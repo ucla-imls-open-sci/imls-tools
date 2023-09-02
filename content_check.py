@@ -51,7 +51,7 @@ def singleEpisode(filepath, episodeName):
     questions = grep(":::.*question", filepath)
     keypoints = grep(":::.*keypoint", filepath)
 
-    message = f"""Episode: {episodeName}
+    message=f"""Episode: {episodeName}
         Questions: {"Valid" if questions else "Invalid"}
         Objectives: {"Valid" if objectives else "Invalid"}
         Keypoints: {"Valid" if keypoints else "Invalid"}
@@ -133,6 +133,10 @@ file_list_column = [
         sg.Column([
         [
             sg.Button("Run", enable_events=True, key="-RUN-", font=(24))
+        ],]),
+        sg.Column([
+        [
+            sg.Button("Clear", enable_events=True, key="-CLEAR-", font=(24))
         ],])
     ]
     
@@ -150,9 +154,6 @@ results_window = [[
     element_justification="left", size=(550, 400), background_color="white", 
     title_color="black", font=(40),
     )],        
-    # [
-    #     sg.Button("Run", enable_events=True, key="-RUN-")
-    # ]
 ]
 
 
@@ -182,6 +183,7 @@ while True:
         try:
             # Get list of files in folder
             file_list = os.listdir(folder)
+            file_list.insert(0,"..")
         except:
             file_list = []
 
@@ -192,6 +194,7 @@ while True:
 
     elif event == "-FILE LIST-":  # A file was chosen from the listbox
         try:
+            # print(values["-FILE LIST-"])
             # Gets the filepath to the file that you clicked on
             filepath = os.path.join(
                 values["-ROOT FOLDER-"], values["-FILE LIST-"][0]
@@ -234,7 +237,7 @@ while True:
                     window["-FRAME TEXT-"].update(entireFolder(filepath))
             
             # OPTION 2 Run Check on Config.yaml
-            if "config.yaml" in filepath:
+            elif "config.yaml" in filepath:
                 window["-FRAME TEXT-"].update(configYaml(filepath))
 
             # OPTION 3 Run Check on a single Episode
@@ -244,16 +247,22 @@ while True:
             # OPTION 4 Run Check on the entire Episodes Folder
             elif re.search("/episodes", filepath):
                 window["-FRAME TEXT-"].update(episodeFolder(filepath))
-
+            
+            else:
+                sg.popup_error("This is an INVALID file/directory! Choose A different file/directory.", 
+                title="Invalid File/Folder", font=(100))
 
         # processing = False
     
     elif event == "-OPEN FOLDER-":
         if folder_clicked:
+            if ".." in filepath:
+                filepath = os.path.abspath(filepath)
             window["-ROOT FOLDER-"].update(filepath)
             try:
                 # Get list of files in folder
                 file_list = os.listdir(filepath)
+                file_list.insert(0, "..")
             except:
                 file_list = []
 
@@ -262,7 +271,8 @@ while True:
             ]
             window["-FILE LIST-"].update(fnames)
         
-
+    elif event == "-CLEAR-":
+        window["-FRAME TEXT-"].update("")
 
 window.close()
 
