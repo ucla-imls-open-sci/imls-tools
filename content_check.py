@@ -1,0 +1,269 @@
+import PySimpleGUI as sg
+import string, sys, os, time, re
+
+
+######################### GLOBAL VARIABLES #########################
+processing = False
+folder_clicked = False
+# open=""
+filepath=""
+################################################################
+
+######################### DEFINE GREP #########################
+def grep(pattern, file):
+    with open(file, 'r') as f:
+        lines = f.readlines()
+
+    matched_lines = [line for line in lines if re.search(pattern, line)]
+
+    return matched_lines
+################################################################
+
+# ######################### DATA PARSING #########################
+# VALIDATES THE CONFIG.YAML
+def configYaml(filePath):
+    # print(os.path.abspath(filePath))
+
+    title = grep("title:", "/Users/lawrencetlee/Personal/Lesson Job/Lessons/care-for-aca/config.yaml")[0].split("'")[1]
+    contact = grep("contact:", filePath)[0].split("'")[1]
+    created = grep("created:", filePath)
+    source = grep("source:", filePath)[0].split("'")[1]
+
+    if "'" in created[0]:
+        created = created[0].split("'")[1]
+    else:
+        created = ""
+
+    message =f"""Config.yaml Validation:
+        Title: {title if title != "Lesson Title" else "Missing"}
+        Contact: {contact if contact != "team@carpentries.org" else "Invalid"}
+        Created: {created if created else "Invalid"}
+        Source: {source if source != "https://github.com/carpentries/workbench-template-md" else "Invalid"}
+    """
+
+    return message
+
+def singleEpisode(filepath, episodeName):
+    solutions = grep(":::.*solution", filepath)
+    discussions = grep(":::.*discussion", filepath)
+    challenges = grep(":::.*challenge", filepath)
+    objectives = grep(":::.*objective", filepath)
+    questions = grep(":::.*question", filepath)
+    keypoints = grep(":::.*keypoint", filepath)
+
+    message = f"""Episode: {episodeName}
+        Questions: {"Valid" if questions else "Invalid"}
+        Objectives: {"Valid" if objectives else "Invalid"}
+        Keypoints: {"Valid" if keypoints else "Invalid"}
+        Number of Challenges: {len(challenges)}
+        Number of Solutions: {len(solutions)}
+        Number of Discussions: {len(discussions)}
+    """
+
+    return message
+
+def entireFolder(filePath):
+    # print(filePath)
+    episode_dir = os.path.join(filePath, "episodes")
+    config = os.path.join(filePath, "config.yaml")
+    message =""
+    print(f"Config Path: {config}")
+    # print(f"Episode Path: {episode_dir}")
+
+    try:
+        config_message = configYaml(config)
+        # print(config_message)
+    except:
+        # print("WTF 1")
+        return
+    episode_message = []
+    try:
+        file_list = os.listdir(episode_dir)
+        # print(file_list)
+        for file_name in file_list:
+            fullPath = os.path.join(episode_dir, f"{file_name}")
+            episode_message.append(singleEpisode(fullPath, file_name))
+        message = config_message
+        for m in episode_message:
+            message += m
+    except:
+        # print("WTF 2")
+        return
+
+    
+
+    return message
+
+def episodeFolder(filePath):
+    episode_message = []
+    message = ""
+    try:
+        file_list = os.listdir(filePath)
+        # print(file_list)
+        for file_name in file_list:
+            fullPath = os.path.join(filePath, f"{file_name}")
+            episode_message.append(singleEpisode(fullPath, file_name))
+        message = ""
+        for m in episode_message:
+            message += m
+    except:
+        # print("WTF 2")
+        return
+
+    return message
+################################################################
+
+
+######################### USER INTERFACE #########################
+# First window that allows you to select your folder
+file_list_column = [
+    [
+        sg.Text("Lesson Folder", font=(24)),
+        sg.In(size=(40, 1), enable_events=True, key="-ROOT FOLDER-"),
+        sg.FolderBrowse(font=(24)),
+    ],
+    [
+        sg.Listbox(values=[], enable_events=True, size=(60, 20), key="-FILE LIST-", font=(24))
+    ],
+    [
+        sg.Column([
+        [
+            sg.Button("", enable_events=folder_clicked, key="-OPEN FOLDER-", font=(24), size=(9,1))
+        ],]),
+        sg.Column([
+        [
+            sg.Button("Run", enable_events=True, key="-RUN-", font=(24))
+        ],])
+    ]
+    
+]
+
+# Second Window Displaying Results
+results_window = [[
+    sg.Frame("Results Window", 
+    layout=[
+        [sg.Multiline("", background_color = "white", 
+        text_color="black", key="-FRAME TEXT-", font=(20), size = (550,400)
+        )],
+
+    ], 
+    element_justification="left", size=(550, 400), background_color="white", 
+    title_color="black", font=(40),
+    )],        
+    # [
+    #     sg.Button("Run", enable_events=True, key="-RUN-")
+    # ]
+]
+
+
+# ----- Full layout -----
+layout = [
+    [
+        sg.Column(file_list_column),
+        sg.VSeparator(),
+        sg.Column(results_window),
+    ]
+]
+
+# ----- Create Window -----
+window = sg.Window("image Viewer", layout, size=(1000, 500))
+
+
+
+
+# Run the Event Loop
+while True:
+    event, values = window.read()
+    if event == "Exit" or event == sg.WIN_CLOSED:
+        break
+    # Folder name was filled in, make a list of files in the folder
+    if event == "-ROOT FOLDER-":
+        folder = values["-ROOT FOLDER-"]
+        try:
+            # Get list of files in folder
+            file_list = os.listdir(folder)
+        except:
+            file_list = []
+
+        fnames = [
+            f for f in file_list
+        ]
+        window["-FILE LIST-"].update(fnames)
+
+    elif event == "-FILE LIST-":  # A file was chosen from the listbox
+        try:
+            # Gets the filepath to the file that you clicked on
+            filepath = os.path.join(
+                values["-ROOT FOLDER-"], values["-FILE LIST-"][0]
+            )
+            
+            if os.path.isdir(filepath):
+                window["-OPEN FOLDER-"].update("Open Folder")
+                folder_clicked = True
+            else:
+                window["-OPEN FOLDER-"].update("")
+                folder_clicked = False
+        except:
+            pass
+
+
+    elif event == "-RUN-":
+        # processing = True
+        if not values["-FILE LIST-"]: # RUN IT ON THE ENTIRE DIRECTORY
+            if not os.path.isdir(values["-ROOT FOLDER-"]):
+                sg.popup_error("This is an INVALID directory", title="Invalid Directory", font=(100))
+            file_list = os.listdir(values["-ROOT FOLDER-"])
+            if "episodes" not in file_list or "config.yaml" not in file_list:
+                sg.popup_error("This is an INVALID directory", title="Invalid Directory", font=(100))
+            else:
+                # message = 
+                window["-FRAME TEXT-"].update(entireFolder(values["-ROOT FOLDER-"]))
+                # print(values["-ROOT FOLDER-"])
+
+        else: # RUN IT ON THE FILE/FOLDER THAT WAS CLICKED
+            # print("FILE CLICKED") #FIXME
+            # if os.path.isdir()
+            # print(filepath)
+            # OPTION 1 Run Check on the entire Directory Highlighted
+            if os.path.isdir(filepath) and "/episodes" not in filepath:
+                file_list = os.listdir(filepath)
+                if "config.yaml" and "episodes" not in file_list:
+                    sg.popup_error("This is an INVALID directory! Choose A different directory.", 
+                    title="Invalid Directory", font=(100))
+                else:
+                    window["-FRAME TEXT-"].update(entireFolder(filepath))
+            
+            # OPTION 2 Run Check on Config.yaml
+            if "config.yaml" in filepath:
+                window["-FRAME TEXT-"].update(configYaml(filepath))
+
+            # OPTION 3 Run Check on a single Episode
+            elif "episodes/" in filepath:
+                window["-FRAME TEXT-"].update(singleEpisode(filepath))
+
+            # OPTION 4 Run Check on the entire Episodes Folder
+            elif re.search("/episodes", filepath):
+                window["-FRAME TEXT-"].update(episodeFolder(filepath))
+
+
+        # processing = False
+    
+    elif event == "-OPEN FOLDER-":
+        if folder_clicked:
+            window["-ROOT FOLDER-"].update(filepath)
+            try:
+                # Get list of files in folder
+                file_list = os.listdir(filepath)
+            except:
+                file_list = []
+
+            fnames = [
+                f for f in file_list
+            ]
+            window["-FILE LIST-"].update(fnames)
+        
+
+
+window.close()
+
+################################################################
