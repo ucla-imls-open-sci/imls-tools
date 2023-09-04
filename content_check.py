@@ -199,9 +199,15 @@ def repo_popup():
             break
         elif event_popup == "-SEARCH-":
             try:
-                        # Create the Temporary Directory:
-                temp_dir = tempfile.mkdtemp()
-                print(temp_dir)
+                # Create the Temporary Directory:
+                if temp_dir is None:
+                    temp_dir = tempfile.mkdtemp()
+                    print(temp_dir)
+                else:
+                    shutil.rmtree(temp_dir)
+                    temp_dir = None
+                    temp_dir = tempfile.mkdtemp()
+                    print(temp_dir)
                 repo_url = values_popup['-REPO-']
                 git_clone_command = ['git', 'clone', repo_url, temp_dir]
                 try:
@@ -333,7 +339,7 @@ while True:
         
     elif event == "-CLEAR-":
         window["-FRAME TEXT-"].update("")
-
+    
     elif event == "-REMOTE-":
         repo_popup()
         
