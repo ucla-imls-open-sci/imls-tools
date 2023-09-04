@@ -236,7 +236,7 @@ def repo_popup():
                 shutil.rmtree(temp_dir)
 
 # ----- Create Windows -----
-window = sg.Window("image Viewer", layout, size=(1000, 500))
+window = sg.Window("Lesson Checker", layout, size=(1000, 500))
 
 # Run the Event Loop
 while True:
