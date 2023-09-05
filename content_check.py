@@ -25,7 +25,7 @@ def grep(pattern, file):
 def configYaml(filePath):
     # print(os.path.abspath(filePath))
 
-    title = grep("title:", "/Users/lawrencetlee/Personal/Lesson Job/Lessons/care-for-aca/config.yaml")[0].split("'")[1]
+    title = grep("title:", filePath)[0].split("'")[1]
     contact = grep("contact:", filePath)[0].split("'")[1]
     created = grep("created:", filePath)
     source = grep("source:", filePath)[0].split("'")[1]
@@ -68,7 +68,7 @@ def entireFolder(filePath):
     episode_dir = os.path.join(filePath, "episodes")
     config = os.path.join(filePath, "config.yaml")
     message =""
-    print(f"Config Path: {config}")
+    # print(f"Config Path: {config}")
     # print(f"Episode Path: {episode_dir}")
 
     try:
@@ -343,11 +343,10 @@ while True:
     elif event == "-REMOTE-":
         repo_popup()
         
-
+# print(temp_dir)
 if temp_dir is not None:
     shutil.rmtree(temp_dir)
 
 window.close()
 
 ################################################################
-
