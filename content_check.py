@@ -5,7 +5,6 @@ import subprocess, tempfile, shutil
 ######################### GLOBAL VARIABLES #########################
 processing = False
 folder_clicked = False
-# open=""
 filepath=""
 temp_dir = None
 ################################################################
