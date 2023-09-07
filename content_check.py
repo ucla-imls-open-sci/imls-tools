@@ -81,8 +81,9 @@ def entireFolder(filePath):
         file_list = os.listdir(episode_dir)
         # print(file_list)
         for file_name in file_list:
-            fullPath = os.path.join(episode_dir, f"{file_name}")
-            episode_message.append(singleEpisode(fullPath, file_name))
+            if ".md" in file_name or ".Rmd" in file_name:
+                fullPath = os.path.join(episode_dir, f"{file_name}")
+                episode_message.append(singleEpisode(fullPath, file_name))
         message = config_message
         for m in episode_message:
             message += m
