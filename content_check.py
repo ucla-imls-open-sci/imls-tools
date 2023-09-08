@@ -102,8 +102,9 @@ def episodeFolder(filePath):
         file_list = os.listdir(filePath)
         # print(file_list)
         for file_name in file_list:
-            fullPath = os.path.join(filePath, f"{file_name}")
-            episode_message.append(singleEpisode(fullPath, file_name))
+            if ".md" in file_name or ".Rmd" in file_name:
+                fullPath = os.path.join(filePath, f"{file_name}")
+                episode_message.append(singleEpisode(fullPath, file_name))
         message = ""
         for m in episode_message:
             message += m
@@ -308,7 +309,7 @@ while True:
 
             # OPTION 3 Run Check on a single Episode
             elif "episodes/" in filepath:
-                window["-FRAME TEXT-"].update(singleEpisode(filepath))
+                window["-FRAME TEXT-"].update(singleEpisode(filepath, values["-FILE LIST-"][0]))
 
             # OPTION 4 Run Check on the entire Episodes Folder
             elif re.search("/episodes", filepath):
