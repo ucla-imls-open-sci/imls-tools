@@ -50,8 +50,15 @@ def singleEpisode(filepath, episodeName):
     objectives = grep(":::.*objective", filepath)
     questions = grep(":::.*question", filepath)
     keypoints = grep(":::.*keypoint", filepath)
+    teaching_time = grep("teaching:", filepath)
+    time = ""
+    if teaching_time:
+        for i in teaching_time[0]:
+            if i.isdigit():
+                time += i
 
     message=f"""Episode: {episodeName}
+        Teaching Time: {time if teaching_time else "Missing"}
         Questions: {"Valid" if questions else "Invalid"}
         Objectives: {"Valid" if objectives else "Invalid"}
         Keypoints: {"Valid" if keypoints else "Invalid"}
