@@ -43,7 +43,58 @@ def configYaml(filePath):
 
     return message
 
+# CHECK EPISODE FOR COMPILE ERRORS
+def episode_compile(filepath):
+    error = []
+    valid = True
+    stack = []
+
+    def grep_line(pattern, file):
+        matched_lines = []
+        
+        with open(file, 'r') as f:
+            for line_number, line in enumerate(f, start=1):
+                if re.search(pattern, line):
+                    matched_lines.append([line_number, line.strip()])
+
+        return matched_lines
+    
+    callout = grep_line(":::", filepath)
+
+    for i in range(len(callout)):
+        callout_block = ""
+        for j in range(len(callout[i][1])):
+            if callout[i][1][j].isalpha():
+                callout_block += callout[i][1][j]
+        callout[i][1] = callout_block
+
+    for i in callout:
+        if i[1]:
+            stack.append(i)
+        else:
+            if not stack:
+                error.append(f"Extraneous closing :::, Line {i[0]}")
+                valid = False
+                continue
+            stack.pop()
+
+    if stack or not valid:
+        for i in stack:
+            error.append(f"{i[1].upper()} missing closing :::, Line {i[0]}")
+
+    return error
+
+# SCANS THROUGH EPISODE
 def singleEpisode(filepath, episodeName):
+    compile_error = episode_compile(filepath)
+    if compile_error:
+        message = f"""Episode: {episodeName}
+        COMPILE ERROR"""
+        for error in compile_error:
+            message += f"""
+                {error}"""
+        return message
+
     solutions = grep(":::.*solution", filepath)
     discussions = grep(":::.*discussion", filepath)
     challenges = grep(":::.*challenge", filepath)
