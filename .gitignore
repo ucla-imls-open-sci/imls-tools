@@ -1,1 +1,8 @@
+# Any Test Files
 *test*
+
+# Virtual Environment
+myenv*
+
+# Local Variables
+.env
