@@ -6,3 +6,6 @@ myenv*
 
 # Local Variables
 .env
+
+# Folder with all the Lesson Proposals
+Lesson_Proposals*
