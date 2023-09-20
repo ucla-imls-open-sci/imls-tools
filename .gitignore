@@ -9,3 +9,6 @@ myenv*
 
 # Folder with all the Lesson Proposals
 Lesson_Proposals*
+
+# Misc
+.DS_store
