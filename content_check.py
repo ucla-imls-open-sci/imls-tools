@@ -29,8 +29,9 @@ def configYaml(filePath):
     created = grep("created:", filePath)
     source = grep("source:", filePath)[0].split("'")[1]
 
-    if "'" in created[0]:
-        created = created[0].split("'")[1]
+    if "20" in created[0]:
+        created = created[0].split(":")[1]
+        created = created.split("\n")[0]
     else:
         created = ""
 
