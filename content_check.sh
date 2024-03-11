@@ -5,8 +5,9 @@ num_args=$#
 if [[ $num_args -eq 0 ]]; then
 if ! [[ -e "$path/config.yaml" ]]; then
 cat << EOF
-Usage: content_check.sh [-P <path>] [ -e | --episode <episode_name> ] [ -C | --challenges ] 
-			[ -S | --solutions ] [ -D | --discussions ] [-o <file>] [--help]
+Usage: content_check.sh [ -P <path> ] [ -e | --episode <episode_name> ] [ -C | --challenges ] 
+			[ -S | --solutions ] [ -D | --discussions ] [ -U <url> | --remote-url <url> ] 
+			[ -o <file path> ] [ --help ]
 EOF
 exit 0
 fi
@@ -14,8 +15,9 @@ fi
 
 if [[ $1 == "--help" ]]; then # FIXME add a manual
 cat << EOF
-Usage: content_check.sh [-P <path>] [ -e | --episode <episode_name> ] [ -C | --challenges ] 
-			[ -S | --solutions ] [ -D | --discussions ]
+Usage: content_check.sh [ -P <path> ] [ -e | --episode <episode_name> ] [ -C | --challenges ] 
+			[ -S | --solutions ] [ -D | --discussions ] [ -U <url> | --remote-url <url> ] 
+			[ -o <file path> ] [ --help ]
 
 Will examine the content in a Lesson and makes sure that the episodes have fulfilled the requirements.
 
@@ -25,28 +27,34 @@ Will examine the content in a Lesson and makes sure that the episodes have fulfi
 -e, --episode <episode_name>
 	Must be used in conjunction with [-P <path>]. It will validate the specific episode passed through
 -C, --challenges
-	Outputs the number of challenges in the episode
+	Outputs only the number of challenges in the episode
 -S, --solutions
-	Outputs the number of solutions in the episode
+	Outputs only the number of solutions in the episode
 -D, --discussions
-	Outputs the number of disucssions in the episode
+	Outputs only the number of disucssions in the episode
+-U <url> , --remote-url <url>
+	Links to a github repository, and will check over the repository
+-o <file path>
+	Directs the output to the given file, outputs to the Terminal by default
 --help
 	Outputs the manual
--o <file>
-	Directs the output to the given file, outputs to the Terminal by default
 EOF
 exit 0
 fi
 
-challenge=0; solution=0; discussion=0; path=""; output="/dev/stdout"
+# Set everything to false 
+challenge=1; solution=1; discussion=1; path=""; output="/dev/stdout"; remote=0;
 
 for ((i=1; i<=$#; i++)); do
 	if [ "${!i}" == "-C" ] || [ "${!i}" == "--challenges" ]; then
-    	challenge=1
+    	solution=0
+		discussion=0
 	elif [ "${!i}" == "-D" ] || [ "${!i}" == "--discussions" ]; then 
-		discussion=1
+		challenge=0
+		solution=0
 	elif [ "${!i}" == "-S" ] || [ "${!i}" == "--solutions" ]; then
-		solution=1
+		challenge=0
+		discussion=0
 	elif [ "${!i}" == "-P" ]; then
 		((i++))
 		if [ -d ${!i} ]; then
@@ -56,12 +64,26 @@ for ((i=1; i<=$#; i++)); do
 			echo "Invalid path: ${!i}"
 			exit 1
 		fi
+	elif [ "${!i}" == "-U" ] || [ "${!i}" == "--remote-url" ]; then
+		((i++))
+		remote_url="${!i}"
+		folder_name=$(basename "$remote_url" .git)
+		git clone --quiet "$remote_url" "$folder_name"
+		path=${folder_name}
+		remote=1
 	elif [ "${!i}" == "-o" ]; then
 		((i++))
 		rm ${!i}
 		touch ${!i}
 		output=${!i}
 		((i--))
+	else
+		cat << EOF
+Usage: content_check.sh [ -P <path> ] [ -e | --episode <episode_name> ] [ -C | --challenges ] 
+			[ -S | --solutions ] [ -D | --discussions ] [ -U <url> | --remote-url <url> ] 
+			[ -o <file path> ] [ --help ]
+EOF
+exit 1
 	fi
 done
 
@@ -72,20 +94,21 @@ else
 	path="./"
 fi
 
-# Scans config.yaml and validates it.
+# Scans config.yaml and validates it - Checks to see if you have filled in Title, Contact, Created, Source
 Title=$(grep -E "title:" $path/config.yaml | awk -F "'" '{print $2}')
 echo -e "Lesson Title: $Title\n" >> $output
 echo -e "Config.yaml Validation:" >> $output
 if [[ $Title = "Lesson Title" ]]; then echo "    Title: Missing" >> $output; else echo "    Title: $Title" >> $output; fi
 contact=$(grep -E "contact:" $path/config.yaml | awk -F "'" '{print $2}')
 if [[ $contact = "team@carpentries.org" ]]; then echo "    Contact: Invalid" >> $output; else echo "    Contact: $contact" >> $output; fi
-created=$(grep -E "created:" $path/config.yaml | awk -F "'" '{print $2}')
+created=$(grep -E "created: " $path/config.yaml | awk -F ": " '{print $2}')
 if [[ -n $created ]]; then echo "    Created: $created" >> $output; else echo "    Created: Invalid" >> $output; fi
 source=$(grep -E "source:" $path/config.yaml | awk -F "'" '{print $2}')
 if [[ $source = "https://github.com/carpentries/workbench-template-md" ]]; then echo "    Source: Invalid" >> $output; else echo "    Source: $source" >> $output; fi
 
 
-# Scans and Checks over the episodes NON-Intrusive doesn't alter the episodes only reads
+# Scans and Checks over the episodes, NON-Intrusive doesn't alter the episodes only reads
+# Checks to see if there are questions, objectives, and keypoints that are required
 echo -e "\nEpisode Validation:" >> $output
 for file in "$path/episodes"/*; do
     if [ -f "$file" ]; then
@@ -111,7 +134,7 @@ for file in "$path/episodes"/*; do
 		else
 			echo "		Keypoints: Invalid" >> $output
 		fi
-
+# Looks over solutions, challenges, and discussions - If solutions != challenges check over content
 		if [ $solution -eq 1 ]; then
 			num_sol=$(expr $(grep -cE ":::.*solution" $file) + 0)
 			echo "		Number of Solutions: " $num_sol >> $output
@@ -126,3 +149,9 @@ for file in "$path/episodes"/*; do
 		fi
     fi
 done
+
+# If you decided to check over a remote repository it will delete the 
+# remote repo from your directory
+if [ $remote -eq 1 ]; then
+	rm -rf ${path}
+fi
