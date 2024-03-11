@@ -27,3 +27,6 @@ The most basic and general case is the following:
 ./content_check.sh -U <remote github url>
 ```
 This will scan over the contents in the github url.
+
+## Documentation
+You can find a more comprehensive documentation of each script here at this [documentation site](https://ucla-imls-open-sci.info/ucla-imls-docs/docs/imls-tools).
