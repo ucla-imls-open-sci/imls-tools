@@ -30,6 +30,8 @@ This will scan over the contents in the github url.
 
 ## llama-checker.py
 ```
+ollama pull nomic-embed-text
+ollama pull mistral
 pip install langchain
 pip install langchain_community
 pip install bs4
