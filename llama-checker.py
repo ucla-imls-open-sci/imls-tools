@@ -25,14 +25,14 @@ doc_splits = text_splitter.split_documents(docs_list)
 vectorstore = Chroma.from_documents(
     documents=doc_splits,
     collection_name="rag-chroma",
-    embedding=embeddings.ollama.OllamaEmbeddings(model='nomic-embed-text'),
+    embedding=embeddings.OllamaEmbeddings(model='nomic-embed-text'),
 )
 retriever = vectorstore.as_retriever()
 
 # Before Rag
 print("Before Rag\n")
 before_rag_template = "What is {topic}"
-before_rag_prompt = ChatPromptTemplate.fromt_template(before_rag_template)
+before_rag_prompt = ChatPromptTemplate.from_template(before_rag_template)
 before_rag_chain = before_rag_prompt | model_local | StrOutputParser()
 print(before_rag_chain.invoke({"topic": "Ollama"}))
 
@@ -50,4 +50,4 @@ after_rag_chain = (
     | StrOutputParser()
 )
 
-print(after_rag_chain("What is Ollama?"))
+print(after_rag_chain.invoke("What is Ollama?"))

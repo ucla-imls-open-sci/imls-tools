@@ -28,5 +28,14 @@ The most basic and general case is the following:
 ```
 This will scan over the contents in the github url.
 
+## llama-checker.py
+```
+pip install langchain
+pip install langchain_community
+pip install bs4
+pip install tiktoken
+pip install chromadb
+```
+
 ## Documentation
 You can find a more comprehensive documentation of each script here at this [documentation site](https://ucla-imls-open-sci.info/ucla-imls-docs/docs/imls-tools).
