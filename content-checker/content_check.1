@@ -1,0 +1,52 @@
+.TH CONTENT_CHECK 1 "November 2024" "content_check.sh manual"
+.SH NAME
+content_check \- Script to validate lesson content.
+
+.SH SYNOPSIS
+content_check.sh [ -P <path> ] [ -e | --episode <episode_name> ] [ -C | --challenges ] 
+                 [ -S | --solutions ] [ -D | --discussions ] [ -I ] 
+                 [ -U <url> | --remote-url <url> ] [ -o <file path> ] [ --help ]
+
+.SH DESCRIPTION
+The \fBcontent_check.sh\fP script examines lesson content to ensure it meets certain validation checks.
+
+.SH OPTIONS
+.TP
+\fB-P <path>\fP
+Path to the Lesson Directory. Defaults to the current directory. It cannot be used in conjunction with the remote-url flag.
+
+.TP
+\fB-e, --episode <episode_name>\fP
+Validates a specific episode.
+
+.TP
+\fB-C, --challenges\fP
+Outputs the number of challenges in the episode.
+
+.TP
+\fB-S, --solutions\fP
+Outputs the number of solutions in the episode.
+
+.TP
+\fB-D, --discussions\fP
+Outputs the number of discussions in the episode.
+
+.TP
+\fB-U <url>, --remote-url <url>\fP
+Links to a remote GitHub repository and checks its content. It cannot be used in conjunction with the path flag.
+
+.TP
+\fB-o <file path>\fP
+Outputs to the specified file path.
+
+.TP
+\fB--help\fP
+Displays the help message.
+
+.SH EXAMPLES
+\fBcontent_check -P ./lesson_directory -C -o output.txt\fP
+\fBcontent_check --remote-url https://github.com/example/repo.git\fP
+\fBcontent_check -I
+
+.SH AUTHOR
+Lawrence Lee <lawrencetrlee@gmail.com>
