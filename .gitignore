@@ -2,7 +2,7 @@
 *test*
 
 # Virtual Environment
-myenv*
+.venv*
 
 # Local Variables
 .env
