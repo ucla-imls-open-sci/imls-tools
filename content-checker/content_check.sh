@@ -62,10 +62,12 @@ for ((i=1; i<=$#; i++)); do
 		if [ -d ${!i} ]; then
 			path="${!i}"
 			((i--))
+			echo $path
 		else
 			echo -e "Invalid path: ${!i}"
 			exit 1
 		fi
+		((i++))
 	elif [ "${!i}" == "-U" ] || [ "${!i}" == "--remote-url" ]; then
 		((i++))
 		remote_url="${!i}"
