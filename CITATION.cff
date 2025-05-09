@@ -1,0 +1,29 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: IMLS Tools
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Lawrence
+    family-names: Lee
+    affiliation: UCLA DataSquad
+    orcid: 'https://orcid.org/0009-0001-2739-4041'
+  - given-names: Eric
+    family-names: Huang
+    affiliation: UCLA DataSquad
+repository-code: 'https://github.com/ucla-imls-open-sci/imls-tools'
+abstract: |2
+    A set of scripts for validating the content structure of a Carpentries-style lesson repository. Includes both a shell script (content_check.sh) and a GUI-enabled Python script (content_check.py) with options to validate individual lesson episodes, folders, or the entire repository. Also includes llama-checker.py for embedding and language model-based checks. See documentation site for full usage instructions.
+keywords:
+  - lesson validation
+  - Carpentries
+  - content checking
+  - shell script
+  - Python
+  - open science
+license: BSD-3-Clause
+commit: fcf6bb7de2e155fd67889816f61a50fef82038e5
