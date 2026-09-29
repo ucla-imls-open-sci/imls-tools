@@ -12,6 +12,8 @@ checker/cli.py) still works unchanged during the transition.
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 import tempfile
 import webbrowser
@@ -21,6 +23,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.text import Text
 
 from checker import __version__
 from checker.cli import _blame_map, _dirty_files, _github_blob_base, _read_glossary, _resolve_target
@@ -473,6 +476,106 @@ def tui(
         err.print(f"[red]{exc}[/]")
         raise typer.Exit(2) from exc
     run(results, path)
+
+
+INSTALL_ROOT = Path(__file__).resolve().parent.parent  # the checkout pixi installed from
+
+
+def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=120)
+
+
+@app.command()
+def update() -> None:
+    """Update wbcheck: git pull its checkout, then refresh the pixi environment.
+
+    For installs made with install.sh (a git checkout in ~/.local/share/wbcheck
+    by default). Refuses if the checkout has uncommitted changes.
+    """
+    root = INSTALL_ROOT
+    if not (root / ".git").exists() or not (root / "pixi.toml").exists():
+        err.print(f"[red]{root} is not a git checkout with pixi.toml[/]; reinstall with install.sh")
+        raise typer.Exit(2)
+    if _git(["status", "--porcelain", "--untracked-files=no"], root).stdout.strip():
+        err.print(f"[red]{root} has uncommitted changes[/]; commit or stash them, then re-run")
+        raise typer.Exit(1)
+    before = _git(["rev-parse", "--short", "HEAD"], root).stdout.strip()
+    with err.status("Pulling the latest wbcheck…"):
+        pulled = _git(["pull", "--ff-only", "--quiet"], root)
+    if pulled.returncode != 0:
+        err.print(f"[red]git pull failed:[/] {pulled.stderr.strip()}")
+        raise typer.Exit(1)
+    after = _git(["rev-parse", "--short", "HEAD"], root).stdout.strip()
+    if before == after:
+        err.print(f"Already up to date ({after}).")
+        return
+    with err.status("Refreshing the pixi environment…"):
+        installed = subprocess.run(
+            ["pixi", "install", "--manifest-path", str(root / "pixi.toml")],
+            capture_output=True, text=True, timeout=900,
+        )
+    if installed.returncode != 0:
+        err.print(f"[red]pixi install failed:[/] {installed.stderr.strip()[-500:]}")
+        raise typer.Exit(1)
+    err.print(f"[green]Updated[/] {before} → {after}. Run [bold]wbcheck --version[/] to confirm.")
+
+
+def _doctor_rows() -> list[tuple[str, bool | None, str]]:
+    """(check, ok, detail) rows; ok None means optional and not set up."""
+    import os
+    import shutil
+    import sys
+    import urllib.request
+
+    rows: list[tuple[str, bool | None, str]] = [
+        ("wbcheck", True, f"v{__version__} at {INSTALL_ROOT}"),
+        ("python", True, sys.version.split()[0]),
+    ]
+    rows.append(("git", bool(shutil.which("git")), "needed to check git URLs, --blame, links, update"))
+
+    if shutil.which("gh"):
+        auth = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+        rows.append(("gh (issues)", auth.returncode == 0,
+                     "logged in" if auth.returncode == 0 else "run `gh auth login`"))
+    else:
+        rows.append(("gh (issues)", None, "install from https://cli.github.com to file issues"))
+
+    rows.append(("quarto (--html/--pdf)", True if shutil.which("quarto") else None,
+                 "found" if shutil.which("quarto") else "optional: https://quarto.org"))
+
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    rows.append(("editor (tui o, fix)", True if editor else None,
+                 editor or "set $EDITOR (e.g. nvim); falls back to vi"))
+
+    rows.append(("claude backend", True if os.environ.get("ANTHROPIC_API_KEY") else None,
+                 "ANTHROPIC_API_KEY set" if os.environ.get("ANTHROPIC_API_KEY")
+                 else "optional: set ANTHROPIC_API_KEY for `review --backend claude`"))
+
+    try:
+        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=1) as resp:
+            models = [m.get("name", "") for m in json.loads(resp.read()).get("models", [])]
+        from checker.ai_review import DEFAULT_MODELS
+
+        wanted = DEFAULT_MODELS["ollama"]
+        have = wanted in models
+        rows.append(("ollama backend", have,
+                     f"server up, {wanted} pulled" if have
+                     else f"server up; pull a model: `ollama pull {wanted}`"))
+    except Exception:  # noqa: BLE001 -- any failure means "not running"
+        rows.append(("ollama backend", None, "optional: `ollama serve` for local AI review"))
+    return rows
+
+
+@app.command()
+def doctor() -> None:
+    """Check what's installed and which optional features are ready."""
+    from rich.table import Table
+
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    for name, ok, detail in _doctor_rows():
+        mark = "[green]✔[/]" if ok else ("[red]✖[/]" if ok is False else "[dim]–[/]")
+        table.add_row(mark, name, Text(detail, style="dim"))
+    Console().print(table)
 
 
 def main() -> None:

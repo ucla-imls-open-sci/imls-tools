@@ -1,106 +1,261 @@
-Carpentries Workbench Checker
-==============================
+Carpentries Workbench Checker (`wbcheck`)
+==========================================
 
 [![License: BSD 3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
 
-Local pre-flight checks for [Carpentries Workbench](https://carpentries.github.io/workbench/)
-lessons: a fast, deterministic structure check (front matter, required
-`:::` blocks, headings, links/images), plus an optional AI narrative review
-of writing and pedagogy. Point it at a local lesson directory or a lesson's
-git URL; run it before opening a PR instead of waiting on the sandpaper CI
-build.
+Fast local checks for [Carpentries Workbench](https://carpentries.github.io/workbench/)
+lessons. `wbcheck` finds structural problems in under a second: front
+matter, required `:::` blocks, headings, broken links and images, and
+leftover scaffold text. An optional AI review covers writing and pedagogy,
+and every finding it reports quotes the lesson text and is checked against
+it. You can browse findings in a terminal UI, open them in your editor at
+the right line, or file them as pull-request-sized GitHub issues.
 
-## Why two layers
-
-Real Carpentries CI (`sandpaper::validate_lesson()` and the `pegboard`
-package's `validate_divs()` / `validate_headings()` / `validate_links()`, run
-inside a Docker container on every PR) is authoritative but slow — several
-minutes, and it only runs after you push. `checker/lesson_check.py` mirrors
-the same rules locally, in under a second, with no dependencies beyond
-Python: required front matter (`title`, `teaching`, `exercises`), the three
-required top-level blocks (`questions`, `objectives`, `keypoints`), balanced
-and recognized `:::` div types, heading rules (start at `##`, no `#`, no
-duplicates), broken internal links/images (including the
-`episodes/fig/`-relative image convention Workbench actually uses, and the
-fact that `.html` links point at rendered `.md` sources, not literal files),
-and whether an episode (or `learners/setup.md`, `instructors/instructor-notes.md`,
-`profiles/learner-profiles.md`) is still the unedited scaffold Sandpaper
-generated, structurally complete but never actually written.
-
-None of that requires a model. The AI layer (`checker/ai_review.py`) is for
-the part a deterministic checker can't do: whether a challenge is
-pedagogically sound, whether the tone matches the
-[style guide](https://carpentries.github.io/sandpaper-docs/instructor/style.html),
-whether something will confuse a learner encountering it fresh. It's given
-the mechanical findings as context so it doesn't repeat them.
-
-This is a local approximation, not a replacement for the real CI check —
-sandpaper is still the final word.
-
-## Setup
-
-Uses [pixi](https://pixi.sh) for the whole environment, including Ollama
-itself (installed from conda-forge, no separate `brew install ollama` step
-needed):
+Run it before you push, instead of waiting on the sandpaper CI build.
 
 ```bash
-pixi install
+curl -fsSL https://raw.githubusercontent.com/ucla-imls-open-sci/carpentries-workbench-checker/main/install.sh | sh
+wbcheck check path/to/lesson
+wbcheck tui path/to/lesson
 ```
 
-## Running the checker
+## Contents
 
-### `wbcheck` (new subcommand CLI)
+- [Install](#install)
+- [Quick tour](#quick-tour)
+- [Commands](#commands)
+- [What it checks](#what-it-checks)
+- [Ignoring findings](#ignoring-findings-wbchecktoml)
+- [The AI review](#the-ai-review)
+- [Reports](#reports)
+- [Filing GitHub issues](#filing-github-issues)
+- [How this relates to sandpaper CI](#how-this-relates-to-sandpaper-ci)
+- [Development](#development)
 
-`wbcheck` splits a run into steps that share one results file,
-`<lesson>/.wbcheck/results.json`. That directory ignores itself with its own
-`.gitignore`, so the lesson repo doesn't need a change. Run it as
-`pixi run wbcheck ...`, or as plain `wbcheck ...` inside `pixi shell`.
-`wbcheck --install-completion` adds tab completion for subcommands and flags
-to your shell.
+## Install
+
+One line, macOS or Linux:
 
 ```bash
-# Fast mechanical checks: prints the report, saves results. Exit 1 on errors.
-wbcheck check ./my-lesson
-wbcheck check ./my-lesson --source      # show the offending source line under each finding
-wbcheck check ./my-lesson --blame       # record who last changed each file
-wbcheck check ./my-lesson --fail-on warning   # exit 1 on warnings too (CI, pre-commit); also info or never
-wbcheck check https://github.com/librarycarpentry/lc-git.git   # temp clone; results saved under ./.wbcheck/
-
-# Slow AI review, added to the same results file (runs `check` first if needed)
-wbcheck review ./my-lesson --backend claude
-
-# Re-render saved results without re-checking
-wbcheck report ./my-lesson                         # terminal
-wbcheck report ./my-lesson --md report.md --json results.json
-wbcheck report ./my-lesson --html report.html --open
-wbcheck report ./my-lesson --pdf report.pdf
+curl -fsSL https://raw.githubusercontent.com/ucla-imls-open-sci/carpentries-workbench-checker/main/install.sh | sh
 ```
 
-#### Browsing findings in the TUI
+The script:
+
+1. installs [pixi](https://pixi.sh) if you don't have it
+2. clones the checker into `~/.local/share/wbcheck`
+3. builds its environment from the lockfile (Python and every dependency,
+   nothing installed system-wide)
+4. puts a `wbcheck` launcher in `~/.pixi/bin`, which pixi's installer
+   already adds to your `PATH`
+
+Then:
 
 ```bash
-wbcheck tui ./my-lesson        # runs `check` first if there are no saved results
+wbcheck doctor                 # which optional pieces are ready (gh, Quarto, Ollama, API key, $EDITOR)
+wbcheck --install-completion   # tab completion for subcommands and flags
 ```
 
-A terminal UI over the saved results. On the left, a folder → file → rule
-code tree with counts, colored by the worst severity in each file. On the
-right, the findings table, with a detail pane below it showing the full
-message, the quote (for AI findings), the fix, clickable guide links, and
-the source lines around the finding.
+**Update** with `wbcheck update` (git pull, then refresh the environment), or
+re-run the install line. **Uninstall** by deleting `~/.local/share/wbcheck`
+and `~/.pixi/bin/wbcheck`.
+
+To install a branch, tag, or fork, or to use different locations, set any of
+`WBCHECK_REF` (default `main`), `WBCHECK_REPO`, `WBCHECK_HOME`, or
+`WBCHECK_BIN_DIR` before `sh`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ucla-imls-open-sci/carpentries-workbench-checker/main/install.sh | WBCHECK_REF=my-branch sh
+```
+
+**Optional extras**, each only needed for one feature:
+
+| For | Needs |
+|---|---|
+| `wbcheck issues`, filing from the TUI | [GitHub CLI](https://cli.github.com), logged in (`gh auth login`) |
+| `report --html` / `--pdf` | [Quarto](https://quarto.org); PDF also needs LaTeX (`quarto install tinytex`) |
+| `review --backend claude` | `ANTHROPIC_API_KEY` |
+| `review --backend ollama` | [Ollama](https://ollama.com) running, plus a model (see [local models](#local-models-16gb-apple-silicon)) |
+| `o` in the TUI | `$VISUAL` or `$EDITOR` set, e.g. `export EDITOR=nvim` (falls back to `vi`) |
+
+Working on the checker itself? See [Development](#development).
+
+## Quick tour
+
+```bash
+wbcheck check ~/lessons/my-lesson          # fast checks; saves results; exit 1 on errors
+wbcheck review ~/lessons/my-lesson --backend claude   # add the AI review to the same results
+wbcheck tui ~/lessons/my-lesson            # browse, open in $EDITOR at the line, ignore, file issues
+wbcheck issues ~/lessons/my-lesson --preview          # what would be filed as GitHub issues
+wbcheck report ~/lessons/my-lesson --html report.html --open
+```
+
+Every command shares one results file per lesson,
+`<lesson>/.wbcheck/results.json`. The folder ignores itself with its own
+`.gitignore`, so lesson repos need no changes. That lets the slow AI review
+run separately from the fast checks, and lets reports, issue filing, and the
+TUI work from saved results without re-checking.
+
+A target can also be a git URL (`wbcheck check
+https://github.com/librarycarpentry/lc-git.git`). It's cloned to a temporary
+directory, and results are saved under `./.wbcheck/` instead.
+
+## Commands
+
+`wbcheck <command> --help` lists every option.
+
+### `check`: the fast mechanical checks
+
+```bash
+wbcheck check LESSON
+wbcheck check LESSON --episode 03-sharing.md   # one episode
+wbcheck check LESSON --source                  # show the offending source line under each finding
+wbcheck check LESSON --blame                   # record who last changed each file with findings
+wbcheck check LESSON --fail-on warning         # exit 1 on warnings too; also info or never
+wbcheck check LESSON --quiet                   # save results without printing
+```
+
+Prints findings grouped by file. Each shows its rule code (a clickable link
+to the guide section in terminals that support hyperlinks: iTerm2, Ghostty,
+WezTerm, VS Code, recent GNOME Terminal), line number, message, and fix.
+Exits `1` if anything is at or above `--fail-on` (default `error`), so it
+works in a pre-commit hook or a lesson's own CI.
+
+### `review`: the AI review
+
+```bash
+wbcheck review LESSON --backend claude                       # Anthropic API
+wbcheck review LESSON --backend ollama                       # local, free
+wbcheck review LESSON --episode 03-sharing.md --backend claude --effort medium
+```
+
+Adds structured, quote-verified findings (`AI201` to `AI208`) to the saved
+results. Runs `check` first if there are no results yet. Re-reviewing an
+episode replaces its earlier AI findings. See [The AI review](#the-ai-review).
+
+### `tui`: browse and triage
+
+```bash
+wbcheck tui LESSON        # runs check first if there are no saved results
+```
+
+A folder → file → rule-code tree on the left, colored by each file's worst
+severity; the findings table on the right; and a detail pane with the full
+message, the quote (AI findings), the fix, clickable guide links, and the
+source lines around the finding.
 
 | Key | Does |
 |---|---|
 | `enter` (tree) | filter to that file or rule code |
-| `space` | select / unselect a finding (moves down) |
+| `space` | select or unselect a finding (moves down) |
+| `o` | open the file at the finding's line in `$VISUAL` / `$EDITOR` (vim, nvim, emacs, nano, VS Code, Cursor, Sublime, Zed, Helix) |
+| `r` | re-run the mechanical checks after editing, keeping AI findings |
 | `i` | ignore the selection (or the current finding): adds its ID to `.wbcheck.toml` |
-| `o` | open the file at the finding's line in `$VISUAL` / `$EDITOR` (vim, nvim, emacs, nano, VS Code, Cursor, Sublime, Zed, Helix...) |
-| `c` | file issues: the selection as **one** issue, or, with nothing selected, the visible findings grouped as `wbcheck issues` would. Shows the list and asks `y`/`n` first, and skips anything already filed |
-| `s` / `a` | cycle the minimum severity (all → warnings+ → errors) / the source (all → mechanical → AI) |
+| `c` | file issues: the selection as **one** issue, or, with nothing selected, the visible warnings and errors grouped as `wbcheck issues` would. Shows the list and asks `y`/`n`, skips anything already filed, and shows progress while it talks to GitHub |
+| `s` / `a` | cycle minimum severity (all → warnings+ → errors) / source (all → mechanical → AI) |
 | `/` | search message, quote, file, and code; `esc` clears every filter |
-| `r` | re-run the mechanical checks (after editing), keeping AI findings |
 | `q` | quit |
 
-#### Ignoring findings: `.wbcheck.toml`
+### `issues`: file findings as GitHub issues
+
+```bash
+wbcheck issues LESSON --preview     # dry run, with each issue body
+wbcheck issues LESSON --create      # file them (asks first; -y skips)
+```
+
+See [Filing GitHub issues](#filing-github-issues).
+
+### `report`: re-render saved results
+
+```bash
+wbcheck report LESSON                              # terminal
+wbcheck report LESSON --md report.md --json results.json
+wbcheck report LESSON --html report.html --open    # needs Quarto
+wbcheck report LESSON --pdf report.pdf             # needs Quarto + LaTeX
+```
+
+### `doctor` and `update`
+
+`wbcheck doctor` shows the version, install location, and which optional
+tools are ready. `wbcheck update` pulls the latest checker and refreshes its
+environment; it refuses if the install has local changes.
+
+## What it checks
+
+Every check has a stable rule code, ruff-style, defined once in
+[`checker/rules.py`](checker/rules.py) with why it matters and a link to the
+most specific guide section that states the rule. Codes are never renumbered
+or reused.
+
+| Code | Severity | Checks |
+|---|---|---|
+| `WB001` | error | config.yaml not found |
+| `WB002` | error | config.yaml is not valid YAML |
+| `WB003` | error | config.yaml is not a key: value mapping |
+| `WB004` | error | config.yaml field is empty or still the template value |
+| `WB005` | warning | `created` date not set |
+| `WB006` | info | `life_cycle` still pre-alpha |
+| `WB007` | error | episode listed in config.yaml does not exist |
+| `WB008` | warning | file in episodes/ has no .md/.Rmd extension |
+| `WB009` | warning | episode file not listed in config.yaml |
+| `WB010` | info | no glossary file |
+| `WB011` | error | no episodes/ directory |
+| `WB012` | error | --episode named a file that doesn't exist |
+| `WB013` | warning | episode file looks like reference content |
+| `WB101` | error | episode has no YAML front matter |
+| `WB102` | error | front matter is not a key: value mapping |
+| `WB103` | error | required front-matter field missing |
+| `WB104` | warning | teaching/exercises is not a number of minutes |
+| `WB105` | info | episode length outside 20-60 minutes |
+| `WB110` | error | episode title is still the scaffold default |
+| `WB111` | warning | episode body still contains scaffold example text |
+| `WB112` | error | placeholder text in questions/objectives/keypoints |
+| `WB113` | warning | setup/instructor notes/profiles still the scaffold |
+| `WB114` | warning | glossary is still the scaffold placeholder |
+| `WB201` | info | unrecognized div type |
+| `WB202` | error | closing ::: with no matching open div |
+| `WB203` | error | div never closed |
+| `WB204` | error | required questions/objectives/keypoints block missing |
+| `WB205` | info | more challenges than solutions |
+| `WB210` | error | episode uses a level-1 heading |
+| `WB211` | warning | first heading is not level 2 (callout/spoiler titles don't count) |
+| `WB212` | warning | duplicate heading text |
+| `WB213` | warning | heading skips a level (h2 → h4), following the rendered outline |
+| `WB301` | warning | image has no alt text |
+| `WB302` | error | image file not found |
+| `WB303` | warning | generic link text ("click here") |
+| `WB304` | warning | internal link target not found |
+| `WB401` | warning | objective opens with a hard-to-assess verb (suggests a rewrite) |
+| `WB402` | info | more than 4 objectives in one episode |
+| `WB403` | warning | objectives declared but no exercise time |
+| `WB404` | info | heavy use of contractions |
+
+`AI201` to `AI208` are the [AI review's](#the-ai-review) findings.
+
+A few details worth knowing:
+
+- Div and heading checks skip fenced code blocks, so a lesson that teaches
+  Markdown or shell `#` comments doesn't trip them.
+- Image paths resolve relative to `episodes/` (the Workbench `episodes/fig/`
+  convention) or the lesson root, and `.html` links resolve to the `.md` or
+  `.Rmd` source they're rendered from.
+- The scaffold checks (`WB110` to `WB114`) catch lessons that are
+  structurally complete but never written: the default "Using Markdown"
+  episode, `keypoint1` bullets, and placeholder `learners/setup.md`,
+  `instructors/instructor-notes.md`, `profiles/learner-profiles.md`, and
+  glossary files.
+- The objectives, contraction, glossary, and heading-skip checks come from
+  the [Collaborative Lesson Development Training](https://carpentries.github.io/lesson-development-training/aio.html)
+  (CLDT) and the [Carpentries Lab reviewer](https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md)
+  and editor checklists, not from sandpaper.
+
+**Finding IDs.** Each finding also has a 12-character `id`: a hash of its
+code, file, and message, with line numbers and counts left out, plus an
+occurrence number for repeats in the same file. The same problem keeps the
+same ID when unrelated edits move it, which is what ignoring and issue
+de-duplication rely on.
+
+## Ignoring findings: `.wbcheck.toml`
 
 Put a `.wbcheck.toml` at the lesson root, and commit it so collaborators
 share it:
@@ -109,187 +264,23 @@ share it:
 [ignore]
 codes = ["WB404"]                      # a rule, everywhere
 paths = ["episodes/all_exercises.md"]  # every finding in these files (globs ok)
-ids = ["8289307d05d3"]                 # single findings, by stable ID
+ids = ["8289307d05d3"]                 # single findings, by ID
 ```
 
-`wbcheck check` and `review` drop matching findings before saving, and the
-report header shows how many were ignored. The TUI's `i` key adds IDs here.
-When it does, the file is rewritten in the canonical form above, so comments
-inside it aren't kept.
+`check` and `review` drop matching findings before saving, and the report
+header says how many were ignored. The TUI's `i` key adds IDs here; when it
+does, the file is rewritten in the form above, so comments inside it aren't
+kept.
 
-#### Filing findings as GitHub issues
+## The AI review
 
-```bash
-wbcheck issues ./my-lesson                     # dry run: table of the issues it would file
-wbcheck issues ./my-lesson --preview           # ...and print each issue body
-wbcheck issues ./my-lesson --create            # file them via `gh` (asks to confirm; -y skips)
-wbcheck issues ./my-lesson --group-by file     # one issue per file, even for lesson-wide rules
-wbcheck issues ./my-lesson --source ai --min-severity info --repo me/my-fork
-```
+Off unless you run `wbcheck review`: it takes time, and the `claude` backend
+costs API usage (roughly $0.10 to $0.25 per episode at `--effort medium`).
 
-Each issue is sized for one pull request:
-- By default (`--group-by auto`), a rule that shows up in 3 or more files
-  gets one lesson-wide issue, e.g. every vague objective in one "rewrite
-  objectives" issue. Other mechanical findings get one issue per file.
-  `--group-by file` or `rule` forces one or the other.
-- AI findings are grouped per file and `scope`, the model's own label for
-  "fix these together". An episode's one-off AI suggestions are folded into
-  a single "other suggestions" issue.
-- Each item has a checkbox, a link to the exact line at the checked commit,
-  the quote (for AI findings), and the fix. A "Why these matter" section
-  cites the guide for each rule code.
-- AI issues get an `ai-suggested` label and a note saying the judgment is a
-  suggestion to verify.
-- Notes (`info`) are left out unless you pass `--min-severity info`.
-
-**Re-running never duplicates.** Every finding's stable ID is embedded in the
-issue body as a hidden comment. Before filing, `wbcheck issues` reads every
-`wbcheck`-labelled issue in the repo, open or closed, and leaves out findings
-already filed, so a finding closed as won't-fix stays closed. The target repo
-defaults to the lesson's GitHub `origin`. Files with uncommitted changes at
-check time can't be linked, and `issues` warns about them first. Needs the
-[GitHub CLI](https://cli.github.com), logged in.
-
-Rule codes in the terminal report link to their guide section in terminals
-that support hyperlinks (iTerm2, Ghostty, WezTerm, VS Code, recent GNOME
-Terminal).
-
-### Legacy flag-based CLI
-
-Still works unchanged during the transition, and is what the `checklesson`
-shell function and `/lesson-checker` skill call today.
-
-```bash
-# Mechanical checks only, terminal output
-pixi run check ./my-lesson
-
-# Or check a lesson straight from its git URL (clones to a temp dir, cleans up after)
-pixi run check https://github.com/librarycarpentry/lc-git.git
-
-# Markdown checklist you can paste into a PR description or read locally
-pixi run check ./my-lesson --format markdown --output report.md
-
-# Same, rendered to HTML with Quarto if you have it installed (falls back to
-# a warning + the markdown file if you don't)
-pixi run check ./my-lesson --format markdown --output report.md --html
-
-# --open launches the rendered HTML in your default browser once it's built
-# (requires --html; a no-op warning otherwise)
-pixi run check ./my-lesson --format markdown --output report.md --html --open
-
-# PDF, for sharing with someone who doesn't want a repo checkout or a browser
-# tab -- also via Quarto, additionally needs a LaTeX distribution
-# (`quarto install tinytex`, or an existing MacTeX/TeX Live on PATH)
-pixi run check ./my-lesson --format markdown --output report.md --pdf
-
-# One episode only
-pixi run check ./my-lesson --episode 03-sharing.md
-
-# Machine-readable, e.g. for a CI step of your own
-pixi run check ./my-lesson --format json
-
-# Annotate each file's findings with who last changed it, date, short SHA --
-# turns the markdown report into something you can split straight into
-# per-owner follow-up issues. Requires my-lesson to be a git repo; silently
-# skipped (no annotations, no error) otherwise.
-pixi run check ./my-lesson --format markdown --blame --output report.md
-```
-
-Exit code is `1` if any error-level finding was reported, `0` otherwise —
-safe to use in a pre-commit hook or your own CI step.
-
-### Reading the markdown/HTML report
-
-Every report format (terminal, markdown, JSON) opens with which tool
-generated it (`carpentries-workbench-checker vX.Y.Z`) and, when
-`config.yaml` and `CITATION.cff` are present, who and what it's about:
-lesson title, carpentry, life cycle, license, source repo, authors, and
-contact -- so a report handed to someone else identifies itself and the
-lesson without extra context. Missing fields (no `CITATION.cff`, an empty
-`config.yaml`) just drop from the block rather than showing blank lines.
-The `--html`/`--pdf` document's own title (the browser tab, the PDF's
-cover/metadata title) is the lesson's title too, not a generic "Lesson
-Check Report" -- it falls back to that generic title only when
-`config.yaml` has none.
-
-The markdown report (and the HTML/PDF built from it) has three parts:
-
-1. **Files** -- one checkbox per location with an issue count, linking down
-   into that file's own section, for file-level triage before reading detail.
-2. **Action summary** -- a table, one row per *shared fix* across the whole
-   lesson (same category, same exact hint text), not one row per finding.
-   A problem repeated many times (the same duplicate-heading warning in 16
-   places) shows up as one row with `Occurrences: 16`, not 16 near-identical
-   lines -- this is what actually answers "what's off, what needs to
-   change" at a glance, which per-finding detail can't.
-3. **Per-file detail**, one `## location` section per file (matching the
-   order you'd actually fix things in an editor). Within a file, findings
-   that share an exact `hint` still collapse into one `**Change:**` +
-   occurrence checklist instead of N separate cards, closed with a single
-   `**Guide:**` link -- so a file with 8 findings that are really "one
-   repeated problem + two one-offs" reads as 3 blocks, not 8 lines.
-
-Every finding whose category has a canonical Workbench/Carpentries doc
-(`config`, `front-matter`, `divs`, `headings`, `links`, `objectives`,
-`style`) links to it via that `**Guide:**` line. `boilerplate` findings
-don't get one, since it's a check this tool invented rather than something
-sandpaper/pegboard document, so their instance-specific hints carry the
-explanation instead. Each occurrence line links back to its source: a real
-GitHub blob URL anchored to the line (`#L42`) when the lesson directory is
-a GitHub repo, plain `` `path:line` `` text otherwise. Terminal output gets
-the same line references as plain `path:line` tokens, which VS Code's
-integrated terminal (and several others) auto-links to jump straight to
-that line.
-
-This structure (file-level triage, then a cross-file pattern summary, then
-file-first detail with same-fix collapsing) came out of a `/validate-external`
-round on the original per-finding-per-line design -- see
-[`design/validation-prompt-report-scannability-2026-08-31.md`](design/validation-prompt-report-scannability-2026-08-31.md).
-
-`--pdf` renders the same markdown through Quarto with a `pdf` target instead
-of `html` -- same checklist, same clickable links (as real hyperlinks, not
-just blue text). One difference: the ❌/⚠️/ℹ️ severity icons don't render in
-PDF (LaTeX's default font has no emoji glyphs, so they're silently dropped);
-severity is still legible from the checkbox/bullet plus the bold category
-name, but it's not as visually distinct as the terminal/HTML output.
-
-### The report's look: a Quarto format extension
-
-`--html`/`--pdf` render through a bundled Quarto custom format extension at
-[`_extensions/checker-report/`](_extensions/checker-report/) (`_extension.yml`
-+ `checker-report.scss`), not inline options in `report.py`. `report.py`
-copies that directory next to the generated `.qmd` at render time -- Quarto
-only discovers `_extensions/` as a sibling of the file being rendered, so
-this happens automatically; nothing to install separately.
-
-The extension owns *how* every report looks (typography, link color, PDF
-margins/colorlinks, the rule under each `## file` heading); `report.py`
-still owns *what* it says. Colors are The Carpentries' own official values
-(navy `#071159` for links, red `#FF4955` for the file-heading rule -- see
-the extension's own README for sourcing); the logo mark itself isn't
-embedded since the logo repo ships with no license and Carpentries'
-own docs require prior approval to use a derived/modified copy of it.
-To change the report's appearance further, edit the extension, not
-`report.py`. `pixi run test` includes a couple of lightweight checks
-(`_extension.yml` exists and parses, declares both `html` and `pdf`) that
-don't need Quarto installed; they just guard against the extension
-directory silently going missing or invalid.
-
-### Adding the AI review
-
-Off by default: it costs time, and for `claude` it costs API usage.
-
-```bash
-wbcheck review ./my-lesson --backend ollama                  # local, free
-wbcheck review ./my-lesson --backend claude                  # Anthropic API
-wbcheck review ./my-lesson --episode 03-sharing.md --backend claude --effort medium
-pixi run check ./my-lesson --ai --backend claude             # legacy CLI, same review as prose
-```
-
-The review returns **structured findings**, not an essay. Each one has a
-rule code by area, a severity, a verbatim quote from the episode, the
-problem, a suggested fix, and a `scope` label that groups related findings
-into one pull request's worth of work:
+It returns **structured findings**, not an essay. Each has a code for its
+area, a severity, a verbatim quote from the episode, the problem, a
+suggested fix, and a `scope` label that groups related findings into one
+pull request's worth of work.
 
 | Code | Area |
 |---|---|
@@ -302,145 +293,166 @@ into one pull request's worth of work:
 | `AI207` | accessibility (alt text, color-only cues) |
 | `AI208` | accuracy |
 
-**Every finding is checked against the text.** The model has to quote the
-episode verbatim, and findings whose quote isn't actually in the episode are
-dropped (tolerant of whitespace, smart quotes, markdown emphasis, and `...`
-elisions). The run reports how many were dropped. So every AI finding in a
-report points at a real line you can check, and a hallucinated finding can't
-get through.
-
-AI findings are saved in the results file next to the mechanical ones
-(`"source": "ai"`) and render in every report format with their quote.
-Re-reviewing an episode replaces its earlier AI findings.
+**Every finding is checked against the text.** The model must quote the
+episode, and a finding whose quote isn't actually there is dropped. Matching
+tolerates whitespace, smart quotes, markdown emphasis, and `...` elisions.
+The run reports how many were dropped. So every AI finding points at a real
+line you can check.
 
 **What the model grades against** is pinned into every prompt from
 [`checker/rubric/`](checker/rubric/): the Carpentries Lab reviewer checklist,
-plus excerpts of the Collaborative Lesson Development Training and Workbench
-docs. Nothing is fetched at review time, so the same lesson gets the same
-rubric every run, and no network or Ollama is needed for the guidance itself.
-To pick up upstream changes, run `pixi run refresh-rubric`, read the diff,
-and commit it. The script fails loudly if an upstream section it expects has
-moved.
+plus excerpts of CLDT and the Workbench docs. Nothing is fetched at review
+time, so the same lesson gets the same rubric every run. The lesson's
+glossary (`learners/reference.md`) goes into the prompt too, so glossary-gap
+findings skip terms already defined. The mechanical findings are included as
+well, so the model doesn't repeat them.
 
-The lesson glossary (`learners/reference.md`, treated as empty while it's
-still the scaffold placeholder) goes into the prompt too, so glossary-gap
-findings skip terms already defined.
-
-| Backend | What it needs | Notes |
+| Backend | Needs | Notes |
 |---|---|---|
-| `ollama` | `pixi run pull-models` (see below), `ollama serve` running | Fully local and free. Output is constrained to the findings schema, with one automatic retry if a local model still misses it |
-| `claude` | `ANTHROPIC_API_KEY` set, or `ant auth login` | Default `claude-opus-5-5`, `--effort high` (`low`/`medium` are cheaper and faster; `xhigh`/`max` are more thorough). The rubric and glossary are prompt-cached across episodes. If a safety classifier declines an episode, the API retries it on a fallback model instead of failing |
+| `claude` | `ANTHROPIC_API_KEY` | Default model `claude-opus-5-5`. `--effort` is `high` by default; `low`/`medium` are cheaper and faster, `xhigh`/`max` more thorough. The rubric and glossary are prompt-cached across episodes, and if a safety classifier declines an episode, the API retries it on a fallback model |
+| `ollama` | `ollama serve` and a pulled model | Fully local and free. Output is constrained to the findings schema, with one automatic retry if the model misses it |
 
-`--model` overrides the default for whichever `--backend` you picked. The
-old `codex` backend was removed. It couldn't enforce the findings schema,
-and it shelled out to a CLI with the whole prompt as an argument.
+`--model` overrides the default for either backend.
 
-## Recommended local models (16GB Apple Silicon)
+### Local models (16GB Apple Silicon)
 
-Pull them with pixi:
+Install [Ollama](https://ollama.com), start it with `ollama serve`, and pull a
+model with `ollama pull <model>`. (A development checkout also has Ollama in
+its pixi environment: `pixi run ollama-serve` and `pixi run pull-models`.)
+`wbcheck doctor` tells you whether the server is up and the default model is
+pulled.
+
+| Model | Download | Use it for |
+|---|---|---|
+| `qwen3.5:9b-q4_K_M` (default) | ~6.6 GB | General episode review; best quality for the footprint, with headroom left on 16GB |
+| `qwen3.5:4b` | ~3.4 GB | Faster checks while drafting; switch to the 9B for a final pass |
+| `qwen2.5-coder:7b` | ~4.7 GB | Lessons heavy on shell, Python, or R code |
+| `gpt-oss:20b` | ~14 GB | Best local quality if you can close everything else; slow with other apps open |
+
+On 16GB, don't run a local review alongside another large model or a heavy
+IDE: swapping slows it down long before memory actually runs out.
+
+## Reports
+
+`wbcheck report` renders saved results as terminal output, markdown, JSON,
+HTML, or PDF. Every format opens with the tool version and, when
+`config.yaml` and `CITATION.cff` have them, the lesson's title, carpentry,
+life cycle, license, source repo, authors, and contact, so a report handed
+to someone else identifies itself.
+
+The markdown report (and the HTML and PDF built from it) has three parts:
+
+1. **Files**: one checkbox per file with its issue count, linking to that
+   file's section.
+2. **Action summary**: one row per *shared fix* across the lesson, so a
+   problem repeated in 16 places is one row with `Occurrences: 16`.
+3. **Per-file detail**, in the order you'd fix things in an editor. Findings
+   in a file that share a fix collapse into one change with a checklist of
+   lines, followed by the rule's guide links.
+
+Each line reference links to the exact line on GitHub at the checked
+commit when the lesson is a GitHub repo; files with uncommitted changes at
+check time are shown as plain `path:line` instead, since the commit wouldn't
+contain what was checked. AI findings show their quote.
+
+HTML and PDF go through a bundled Quarto format extension,
+[`checker/quarto/_extensions/checker-report/`](checker/quarto/_extensions/checker-report/),
+which owns the look (typography, Carpentries link and accent colors, PDF
+margins); `report.py` owns the content. The Carpentries logo isn't embedded,
+since its repo has no license. In PDFs, the ❌/⚠️/ℹ️ severity icons don't
+render (LaTeX's default font has no emoji); severity still shows through the
+checkbox and bold rule code.
+
+## Filing GitHub issues
 
 ```bash
-pixi run pull-models          # qwen3.5:9b-q4_K_M (default, balanced)
-pixi run pull-models-small     # qwen3.5:4b (faster, lighter)
-pixi run pull-models-coding    # qwen2.5-coder:7b (for code-heavy lessons)
+wbcheck issues LESSON                           # dry run: the issues it would file
+wbcheck issues LESSON --preview                 # ...with each body
+wbcheck issues LESSON --create                  # file them via gh (asks first; -y skips)
+wbcheck issues LESSON --group-by file           # one issue per file, even for lesson-wide rules
+wbcheck issues LESSON --source ai --min-severity info --repo me/my-fork
 ```
 
-| Model | Download | Use it for | Why |
-|---|---|---|---|
-| `qwen3.5:9b-q4_K_M` (default) | ~6.6 GB | General episode review | Best balance of quality and footprint at this size — 256K context, leaves real headroom on 16GB while your browser/editor are also open |
-| `qwen3.5:4b` | ~3.4 GB | Quick iterative checks | Noticeably faster, still coherent; use while drafting, switch to the 9B for a final pass |
-| `qwen2.5-coder:7b` | ~4.7 GB | Lessons with heavy code blocks (shell, Python, R episodes) | Coder-tuned variant reviews code samples more carefully than the general model |
-| `gpt-oss:20b` | ~14 GB | A stretch option if you want the best local quality and can close everything else | Runs on 16GB via MXFP4 quantization, but leaves little headroom — expect it to be slow with other apps open |
+Each issue is sized for one pull request:
 
-Don't run the checker's Ollama backend and something else memory-hungry
-(another large model, a heavy IDE) at the same time on 16GB — swap will tank
-throughput long before you run out of RAM outright.
+- By default (`--group-by auto`), a rule that shows up in 3 or more files
+  gets one lesson-wide issue, e.g. every vague objective in one issue. Other
+  mechanical findings get one issue per file. `--group-by file` or `rule`
+  forces one or the other.
+- AI findings are grouped per file and `scope`. An episode's one-off
+  suggestions share one "other suggestions" issue, labelled `ai-suggested`
+  with a note that they're suggestions to verify.
+- Each item has a checkbox, a link to its line at the checked commit, the
+  quote (AI findings), and the fix. A "Why these matter" section cites the
+  guide for each rule.
+- Notes (`info`) are left out unless you pass `--min-severity info` (or, in
+  the TUI, select them yourself).
 
-## What each check maps to
+**Re-running never duplicates.** Each finding's ID is hidden in the issue
+body. Before filing, `issues` reads every `wbcheck`-labelled issue in the
+repo, open or closed, and leaves out anything already filed, so a finding
+you close as won't-fix stays closed. The repo defaults to the lesson's
+GitHub `origin`, and it warns first when files had uncommitted changes at
+check time, since their items can't link to GitHub.
 
-| Category | What we check | Mirrors |
-|---|---|---|
-| `config` | Placeholder values left unfilled, `created` date, episode list vs. files on disk, episode files under `episodes/` with no `.md`/`.Rmd` extension (invisible to both Sandpaper and this checker's own glob otherwise) | `sandpaper::validate_lesson()` |
-| `front-matter` | `title` / `teaching` / `exercises` present and numeric, episode length (`teaching`+`exercises`) roughly 20–60 min | `sandpaper::validate_lesson()`, [CLDT episode scope guidance](https://carpentries.github.io/lesson-development-training/aio.html) |
-| `divs` | Required `questions`/`objectives`/`keypoints`, balanced `:::` fences, recognized div types, challenge/solution counts | `pegboard::validate_divs()` |
-| `headings` | First heading is `##`, no `#`, no duplicate headings | `pegboard::validate_headings()` |
-| `links` | Missing alt text, broken internal links/images (including `episodes/fig/`-relative images and `.html`→`.md` resolution), generic link text (`"click here"`) | `pegboard::validate_links()`, [Carpentries Lab reviewer checklist](https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md) |
-| `objectives` | Weak/unmeasurable objective verbs (`know`, `understand`, `appreciate`, ...) vs. action verbs (`explain`, `choose`, `predict`, ...) | CLDT's SMART objectives guidance |
-| `style` | Heavy contraction use | Carpentries Lab reviewer checklist (accessibility, translation/ESL learners) |
-| `boilerplate` | Unedited `sandpaper::create_lesson()` scaffold left in place: an episode's title or body still the generated default, or a `questions`/`objectives`/`keypoints` block that exists but only holds placeholder bullets (`keypoint1`, `Put questions here`, ...); same idea applied to `learners/setup.md`, `learners/reference.md`, `instructors/instructor-notes.md`, `profiles/learner-profiles.md`, which the checks above never look at since they aren't episodes | CLDT, a structurally-complete episode (passes every check above) can still be entirely unwritten, this is the gap between "the required blocks exist" and "someone wrote the lesson" |
-| `config` | *(also)* missing lesson glossary (`reference.md`); a file under `episodes/` that's unlisted in `episodes:` *and* has none of the three required blocks -- a strong signal it's misplaced reference content (e.g. a glossary or resources page) rather than an unwritten episode, regardless of what it's named | Carpentries Lab reviewer checklist |
+## How this relates to sandpaper CI
 
-Div and heading checks skip content inside fenced code blocks (```` ``` ````/`~~~`) — a lesson that teaches Markdown, Workbench syntax, or shell `#` comments will contain literal `:::`/`#` text that isn't a real div or heading.
+The Carpentries' own CI (`sandpaper::validate_lesson()` and pegboard's
+`validate_divs()`, `validate_headings()`, and `validate_links()`, run in
+Docker on every PR) is authoritative but slow: several minutes, and only
+after you push. `wbcheck` mirrors those rules locally in under a second and
+adds the CLDT and Carpentries Lab checks above. It's an approximation, not a
+replacement: sandpaper is still the final word.
 
-### Rule codes and finding IDs
+## Development
 
-Every check has a stable rule code, ruff-style, shown in brackets in the
-terminal report (`[WB204]`) and inline in the markdown report. The registry
-in [`checker/rules.py`](checker/rules.py) defines each code's name, why it
-matters, and the most specific guide section that states the rule.
+```bash
+git clone https://github.com/ucla-imls-open-sci/carpentries-workbench-checker.git
+cd carpentries-workbench-checker
+pixi install
+pixi run wbcheck check path/to/lesson     # or `pixi shell`, then plain `wbcheck`
+```
 
-| Range | Covers |
+The pixi environment installs the package in editable mode, so code changes
+take effect immediately.
+
+| Task | Does |
 |---|---|
-| `WB0xx` | `config.yaml`, episode list, lesson-level files |
-| `WB1xx` | episode front matter, scaffold/placeholder content, support files |
-| `WB2xx` | fenced divs and headings |
-| `WB3xx` | links and images |
-| `WB4xx` | objectives and style |
-| `AI2xx` | AI review findings, one code per review area (see [Adding the AI review](#adding-the-ai-review)) |
+| `pixi run test` | the test suite: no network, models, gh, or Quarto needed (the AI backends, gh, and editor are faked) |
+| `pixi run lint` / `lint-fix` | ruff: unused imports, import order, missing docstrings in `checker/`, outdated syntax |
+| `pixi run refresh-rubric` | re-fetch the AI review's guidance excerpts into `checker/rubric/`; read the diff before committing. Fails loudly if an upstream section it expects has moved |
+| `pixi run pull-models` | pull the default local Ollama model (`-small` and `-coding` variants too) |
 
-Codes are never renumbered or reused. Each finding in `--format json` output
-also carries an `id`: a hash of its code, file, and message with line numbers
-and counts stripped, plus an occurrence number for repeats in the same file.
-The same problem keeps the same `id` when unrelated edits move it, which is
-what issue filing and suppression key on (#21, #23).
+CI runs the tests and lint, then installs with `install.sh` on Linux and
+macOS and runs the installed `wbcheck` from outside the repo, so a file
+missing from the package fails the build.
 
-The `objectives`, `style`, and glossary checks aren't things `sandpaper`/`pegboard` check at all — they come from [Collaborative Lesson Development Training](https://carpentries.github.io/lesson-development-training/aio.html) and [The Carpentries Lab's reviewer checklist](https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md), the same two sources pinned into the AI review's prompt (see `checker/rubric/`), so it grades against the same rubric a human Lab reviewer would.
+`pixi run format` (`ruff format`) exists but isn't applied wholesale; it
+would reflow a lot of intentionally formatted prose strings.
 
-## Testing
+The design notes behind the current version are in [`design/`](design/),
+starting with
+[`modernization-assessment-2026-09-29.md`](design/modernization-assessment-2026-09-29.md).
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-```bash
-pixi run test
-```
+### Legacy CLI
 
-Unit tests cover the mechanical checks only (`checker/lesson_check.py`) — no
-network access or local models needed. The AI review layer isn't covered by
-automated tests since it calls out to live models; it's been manually
-smoke-tested against a real public lesson for all three backends.
-
-## Linting
+The original flag-based CLI still works from a development checkout, and is
+superseded by `wbcheck`:
 
 ```bash
-pixi run lint        # ruff check checker tests
-pixi run lint-fix    # same, with --fix for the auto-fixable subset
+pixi run check LESSON [--episode NAME] [--format terminal|markdown|json] [--output FILE]
+                      [--html] [--pdf] [--open] [--blame] [--ai --backend ollama|claude]
 ```
 
-Runs in CI alongside the test suite. Covers unused imports/vars, import
-order, missing docstrings on public functions/classes (`checker/` only,
-`tests/*.py` is exempt, pytest's own naming convention documents test
-intent), and outdated syntax patterns. `pixi run format` (`ruff format`)
-exists too, but isn't run in CI or applied wholesale, it would reflow a lot
-of intentionally-formatted code (long hint strings, grouped constant
-tuples) for cosmetic reasons alone.
-
-## Migrating from the old scripts
-
-This replaces `content-checker/` (`content_check.py`, `content_check_cli.py`,
-`content_check.sh`) and `llama-checker.py`, which are removed. The old
-`content_check.sh -U <url>` remote-check and `-o <file>` output-to-file
-options are now `pixi run check <url>` and `--output <file>`; the GUI/CLI
-episode picker is gone in favor of `--episode <name>` (scripting-friendly,
-and doesn't hardcode a contributor's home directory the way the old shell
-script did).
-
-`legacy/proposal_analysis.ipynb` (scores lesson proposal PDFs against a rubric via
-the OpenAI API) is unrelated to lesson checking and untouched here — it
-still uses the legacy `openai.Completion.create` API and could use its own
-pass at some point.
+It replaced the earlier `content-checker/` scripts and `llama-checker.py`.
+`legacy/proposal_analysis.ipynb` (scoring lesson proposals with the OpenAI
+API) is unrelated to lesson checking and kept only for reference.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Everyone participating is expected
-to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Everyone participating is expected to
+follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
