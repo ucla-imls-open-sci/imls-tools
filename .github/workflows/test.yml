@@ -16,3 +16,33 @@ jobs:
           cache: true
       - run: pixi run test
       - run: pixi run lint
+
+  # Installs the way users do (install.sh: pixi + clone + launcher) and runs
+  # the installed wbcheck from outside the repo, so packaging mistakes (a
+  # module or data file missing from the package) fail CI.
+  install:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install with install.sh from this commit
+        env:
+          WBCHECK_REPO: ${{ github.workspace }}
+          WBCHECK_REF: ${{ github.sha }}
+        run: sh install.sh
+      - name: Run the installed wbcheck on a tiny lesson
+        run: |
+          export PATH="$HOME/.pixi/bin:$PATH"
+          mkdir -p /tmp/lesson/episodes
+          printf "title: 'T'\ncontact: 'a@b.org'\ncreated: 2026-01-01\nsource: 'https://x.org'\n" > /tmp/lesson/config.yaml
+          printf -- "---\ntitle: 'Ep'\nteaching: 15\nexercises: 15\n---\n## Heading\n" > /tmp/lesson/episodes/01.md
+          cd /tmp
+          wbcheck --version
+          wbcheck doctor
+          wbcheck check /tmp/lesson -q --fail-on never
+          wbcheck report /tmp/lesson --md /tmp/report.md
+          grep -q WB204 /tmp/report.md

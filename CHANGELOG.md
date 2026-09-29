@@ -7,7 +7,7 @@ issue filing. Tracked in #21 to #28; the design is in
 `design/modernization-assessment-2026-09-29.md`.
 
 ### Added
-- **`wbcheck` CLI** with `check`, `review`, `report`, `issues`, and `tui`
+- **`wbcheck` CLI** with `check`, `review`, `report`, `issues`, `tui`, `doctor`, and `update`
   subcommands sharing `<lesson>/.wbcheck/results.json` (#24). Rich terminal
   output, tab completion (`wbcheck --install-completion`), and `check
   --fail-on error|warning|info|never` for CI and pre-commit use.
@@ -22,6 +22,9 @@ issue filing. Tracked in #21 to #28; the design is in
 - **`.wbcheck.toml`** to ignore findings by code, path glob, or ID.
 - **WB213**: headings that skip a level (h2 to h4), per the Carpentries Lab
   editor checklist.
+- **One-line install** with pixi (`install.sh`), plus `wbcheck doctor` and
+  `wbcheck update`. CI installs with the script on Linux and macOS and runs
+  the installed command.
 
 ### Changed
 - **AI review returns structured findings** with a verbatim quote, which is
@@ -37,6 +40,9 @@ issue filing. Tracked in #21 to #28; the design is in
   backend; the `codex` backend.
 
 ### Fixed
+- Installed packages were missing `checker/report.py` (an unanchored
+  `report.*` in `.gitignore` excluded it from the build) and the Quarto
+  report extension (now shipped inside the package).
 - WB211 flagged callout and spoiler titles (`###` inside a fenced div) as
   a bad first heading.
 - `--format json` crashed on an unquoted `created:` date in config.yaml.

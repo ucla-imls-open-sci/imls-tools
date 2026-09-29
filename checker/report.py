@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -436,7 +436,7 @@ def render_markdown(
     this report is written.
     """
     counts = summarize(findings)
-    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    generated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     lines = [f"# {title}", ""]
     metadata_lines = _lesson_metadata_lines(metadata, bold_open="**", bold_close="**")
     if metadata_lines:
@@ -535,7 +535,7 @@ def render_json(
     caller piping stdout doesn't get a JSON document followed by prose."""
     payload = {
         "title": title,
-        "generated": datetime.now(timezone.utc).isoformat(),
+        "generated": datetime.now(UTC).isoformat(),
         "generated_by": {"name": "carpentries-workbench-checker", "version": __version__},
         "lesson": asdict(metadata) if metadata is not None else None,
         "summary": summarize(findings),
@@ -547,13 +547,13 @@ def render_json(
     return json.dumps(payload, indent=2, default=str)
 
 
-# The "checker-report" Quarto format extension (see _extensions/checker-report/
-# in the repo root -- checker/report.py's parent's parent) owns the report's
-# actual look (theme, PDF margins, toc). Quarto only discovers an
-# `_extensions/` directory that's a sibling of the .qmd being rendered, so
+# The "checker-report" Quarto format extension (checker/quarto/_extensions/,
+# inside the package so it ships with installs) owns the report's actual look
+# (theme, PDF margins, toc). Quarto only discovers an `_extensions/`
+# directory that's a sibling of the .qmd being rendered, so
 # _render_via_quarto copies it into the temp render directory each time.
 _EXTENSION_NAME = "checker-report"
-_EXTENSION_SRC = Path(__file__).resolve().parent.parent / "_extensions" / _EXTENSION_NAME
+_EXTENSION_SRC = Path(__file__).resolve().parent / "quarto" / "_extensions" / _EXTENSION_NAME
 
 
 def _render_via_quarto(

@@ -16,12 +16,14 @@ __pycache__/
 .pixi/
 *.egg-info/
 
-# Generated reports (checker output)
-report.*
-*-report.md
-*-report.html
-*-report.pdf
-*-report.json
+# Generated reports (checker output). Anchored to the repo root: an
+# unanchored `report.*` also matched checker/report.py, and the package
+# build honors .gitignore, so the module was silently left out of installs.
+/report.*
+/*-report.md
+/*-report.html
+/*-report.pdf
+/*-report.json
 
 # Session handoff notes
 HANDOFF.md
