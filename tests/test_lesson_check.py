@@ -872,3 +872,62 @@ def test_run_checks_does_not_flag_unlisted_file_with_partial_structure(tmp_path)
     )
     findings = run_checks(lesson_dir)
     assert not any("looks like reference content" in f.message for f in findings)
+
+
+# -- evaluation fixes (rclone-intro issues, 2026-09-29) ------------------------
+
+
+def test_callout_title_heading_is_not_a_first_heading_violation():
+    body = ":::: callout\n\n### This episode is optional\n\nText.\n\n::::\n\n## What is it?\n"
+    assert not [f for f in _check_headings(body, "ep.md") if f.code == "WB211"]
+
+
+def test_first_heading_outside_divs_still_checked():
+    body = ":::: spoiler\n### Code state\n::::\n\n### Too deep\n"
+    [f] = [f for f in _check_headings(body, "ep.md") if f.code == "WB211"]
+    assert f.line == 5
+
+
+def test_h1_inside_div_is_still_an_error():
+    assert [f.code for f in _check_headings(":::: callout\n# Big\n::::\n", "ep.md")] == ["WB210"]
+
+
+def test_vague_objective_has_line_and_concrete_rewrite():
+    body = ":::: objectives\n- Explain X.\n- Understand the difference between copy and sync\n::::\n"
+    findings, _ = _check_objective_verbs(body, "ep.md", line_offset=5)
+    [f] = findings
+    assert f.line == 8
+    assert 'Try "Explain the difference between copy and sync"' in f.hint
+
+
+def test_objective_rewrite_for_know():
+    body = ":::: objectives\n- Know where to get help and examples\n::::\n"
+    [f], _ = _check_objective_verbs(body, "ep.md")
+    assert 'Try "Identify where to get help and examples"' in f.hint
+
+
+def test_front_matter_and_contraction_findings_have_lines(tmp_path):
+    lesson = tmp_path / "lesson"
+    (lesson / "episodes").mkdir(parents=True)
+    prose = " ".join(["It's here and we're there, don't stop."] * 3 + ["word"] * 40)
+    ep = lesson / "episodes" / "01.md"
+    ep.write_text(f"---\ntitle: 'Ep'\nteaching: 5\nexercises: '5'\n---\n{VALID_EPISODE_BODY}\n{prose}\n")
+    findings = {f.code: f for f in check_episode(ep, lesson)}
+    assert findings["WB104"].line == 4  # exercises: '5'
+    assert findings["WB404"].line == len(VALID_EPISODE_BODY.splitlines()) + 7
+
+
+def test_hints_carry_no_source_tags_or_double_dashes(tmp_path):
+    lesson = tmp_path / "lesson"
+    (lesson / "episodes").mkdir(parents=True)
+    body = VALID_EPISODE_BODY.replace("- Learn things.", "- Understand things.") + "\n[here](x.md)\n"
+    ep = lesson / "episodes" / "01.md"
+    ep.write_text(f"---\ntitle: 'Using Markdown'\nteaching: 1\nexercises: 0\n---\n{body}")
+    for f in check_episode(ep, lesson):
+        assert f.hint is None or ("[CLDT" not in f.hint and "[Carpentries" not in f.hint and " -- " not in f.hint), f
+
+
+def test_objective_rewrite_drops_trailing_period():
+    body = ":::: objectives\n- Understand what a remote is.\n::::\n"
+    [f], _ = _check_objective_verbs(body, "ep.md")
+    assert 'Try "Explain what a remote is", then' in f.hint

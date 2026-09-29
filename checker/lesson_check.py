@@ -148,8 +148,8 @@ def resolve_glossary_path(lesson_dir: Path) -> str | None:
 
 GLOSSARY_PLACEHOLDER_FINGERPRINT = "this is a placeholder file"
 GLOSSARY_HINT = (
-    "[Carpentries Lab] 'No key terms are missing from the lesson glossary' is part of "
-    "the reviewer checklist. Port over the terms your episodes actually use."
+    "Add the terms your episodes actually use. The Carpentries Lab reviewer checklist asks "
+    "that no key terms are missing from the lesson glossary."
 )
 
 # Scaffold text in learners/instructors/profiles files -- these aren't
@@ -161,14 +161,14 @@ GLOSSARY_HINT = (
 SUPPORT_FILE_CHECKS = {
     "learners/setup.md": (
         "fixme: setup instructions live in this document",
-        "[CLDT] Covered in the 'Preparing to Teach' episode's Setup Instructions exercise. "
+        "Covered in CLDT's 'Preparing to Teach' episode (Setup Instructions exercise). "
         "If your lesson needs no software/data setup, replace this with a short note saying "
         "so, rather than leaving the scaffold's example instructions in place.",
     ),
     "instructors/instructor-notes.md": (
         "this is a placeholder file",
-        "[CLDT] Covered in the 'Preparing to Teach' episode's Instructor Notes exercise: "
-        "rationale, what worked/didn't in early drafts, teaching tips, common "
+        "Covered in CLDT's 'Preparing to Teach' episode (Instructor Notes exercise): "
+        "rationale, what worked or didn't in early drafts, teaching tips, common "
         "troubleshooting.",
     ),
     "profiles/learner-profiles.md": (
@@ -432,8 +432,8 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                 "config",
                 "no glossary file found (learners/reference.md)",
                 location="config.yaml",
-                hint="[Carpentries Lab] Checks that no key terms are missing from the "
-                "lesson glossary. This only checks the file exists, not its contents.",
+                hint="Add learners/reference.md with the key terms your episodes use. This "
+                "check only looks for the file, not its contents.",
                 code="WB010",
             )
         )
@@ -546,7 +546,25 @@ def _split_front_matter(text: str) -> tuple[dict, str] | None:
 _SINGULAR_FIELD_TYPOS = {"exercises": "exercise"}
 
 
-def _check_front_matter(front_matter: dict, location: str) -> list[Finding]:
+_FM_FIELD_RE = re.compile(r"^([A-Za-z_][\w-]*)\s*:")
+
+
+def _front_matter_lines(text: str) -> dict[str, int]:
+    """Top-level front-matter field -> 1-indexed file line."""
+    lines: dict[str, int] = {}
+    for n, line in enumerate(text.splitlines()[1:], start=2):
+        if line.strip() == "---":
+            break
+        match = _FM_FIELD_RE.match(line)
+        if match:
+            lines.setdefault(match.group(1), n)
+    return lines
+
+
+def _check_front_matter(
+    front_matter: dict, location: str, field_lines: dict[str, int] | None = None
+) -> list[Finding]:
+    field_lines = field_lines or {}
     findings = []
     for field in ("title", "teaching", "exercises"):
         if field not in front_matter or front_matter[field] in (None, ""):
@@ -563,6 +581,7 @@ def _check_front_matter(front_matter: dict, location: str) -> list[Finding]:
                     "front-matter",
                     f"missing required front-matter field `{field}`",
                     location=location,
+                    line=field_lines.get(field) or field_lines.get(typo or ""),
                     hint=hint,
                     code="WB103",
                 )
@@ -576,6 +595,7 @@ def _check_front_matter(front_matter: dict, location: str) -> list[Finding]:
                     "front-matter",
                     f"`{field}` should be a number of minutes, got {value!r}",
                     location=location,
+                    line=field_lines.get(field),
                     hint=f"Set `{field}:` to a plain integer, e.g. `{field}: 15`, not a "
                     "quoted string or a range.",
                     code="WB104",
@@ -593,15 +613,37 @@ def _check_front_matter(front_matter: dict, location: str) -> list[Finding]:
                     f"episode is {total:g} min (teaching + exercises), outside the "
                     "20-60 min range Collaborative Lesson Development Training suggests",
                     location=location,
-                    hint="[CLDT] Not a hard rule -- but very short or very long episodes are "
-                    "worth a second look for scope.",
+                    line=field_lines.get("teaching"),
+                    hint="Not a hard rule: a very short or very long episode is worth a second "
+                    "look for scope. Short episodes in a short lesson are often fine.",
                     code="WB105",
                 )
             )
     return findings
 
 
-def _check_objective_verbs(body: str, location: str) -> tuple[list[Finding], int]:
+# Vague opener -> an observable verb to suggest in its place. A starting
+# point for the author, not a claim that the rewrite is right.
+_OBJECTIVE_REWRITES = (
+    (re.compile(r"^(?:gain|develop) an understanding of\b", re.I), "Explain"),
+    (re.compile(r"^(?:be|become) familiar with\b", re.I), "Describe"),
+    (re.compile(r"^be aware of\b", re.I), "Identify"),
+    (re.compile(r"^learn about\b", re.I), "Describe"),
+    (re.compile(r"^understand\b", re.I), "Explain"),
+    (re.compile(r"^know\b", re.I), "Identify"),
+    (re.compile(r"^appreciate\b", re.I), "Explain why"),
+    (re.compile(r"^grasp\b", re.I), "Explain"),
+)
+
+
+def _suggest_objective(text: str) -> str | None:
+    for pattern, verb in _OBJECTIVE_REWRITES:
+        if pattern.match(text):
+            return pattern.sub(verb, text, count=1).rstrip(".;: ")
+    return None
+
+
+def _check_objective_verbs(body: str, location: str, line_offset: int = 0) -> tuple[list[Finding], int]:
     """Flag objectives that open with a verb that's often hard to assess
     (know/understand/...) instead of an action verb (explain/choose/predict/...)
     -- see CLDT's SMART objectives guidance and the Carpentries Lab reviewer
@@ -614,6 +656,7 @@ def _check_objective_verbs(body: str, location: str) -> tuple[list[Finding], int
     in_objectives = False
     objectives_depth = None
     objective_count = 0
+    objectives_line = None
 
     for i, line in enumerate(lines):
         if in_code[i]:
@@ -625,6 +668,7 @@ def _check_objective_verbs(body: str, location: str) -> tuple[list[Finding], int
                 if div_type == "objectives" and depth == 0:
                     in_objectives = True
                     objectives_depth = depth
+                    objectives_line = i + 1 + line_offset
                 depth += 1
             else:
                 depth -= 1
@@ -648,9 +692,8 @@ def _check_objective_verbs(body: str, location: str) -> tuple[list[Finding], int
                     f'objective opens with a phrase that can be hard to assess '
                     f'("{verb_match.group(1)}"): "{bullet_text[:70]}"',
                     location=location,
-                    hint="[CLDT] Not a hard rule -- judge by whether attainment is directly "
-                    "observable, not just the opening word. An action verb (explain, "
-                    "choose, predict, ...) usually makes that easier to write.",
+                    line=i + 1 + line_offset,
+                    hint=_objective_hint(bullet_text),
                     code="WB401",
                 )
             )
@@ -662,13 +705,23 @@ def _check_objective_verbs(body: str, location: str) -> tuple[list[Finding], int
                 "objectives",
                 f"{objective_count} objectives in this episode",
                 location=location,
-                hint="[CLDT] Aim for 2-4 objectives per episode; consider splitting into "
-                "multiple episodes if you need more.",
+                line=objectives_line,
+                hint="Aim for 2-4 objectives per episode; consider splitting into multiple "
+                "episodes if you need more.",
                 code="WB402",
             )
         )
 
     return findings, objective_count
+
+
+def _objective_hint(bullet_text: str) -> str:
+    suggestion = _suggest_objective(bullet_text)
+    lead = f'Try "{suggestion}", ' if suggestion else "Rewrite it with an observable verb, "
+    return (
+        lead + "then make sure an exercise lets learners show it. The test is whether "
+        "attainment is observable, not the opening word itself."
+    )
 
 
 def _check_boilerplate(
@@ -697,7 +750,7 @@ def _check_boilerplate(
                 "boilerplate",
                 f'title is still the scaffold default: "{front_matter.get("title")}"',
                 location=location,
-                hint="[CLDT] This is `sandpaper::create_lesson()`'s own default episode "
+                hint="This is `sandpaper::create_lesson()`'s own default episode "
                 "title, not a real one. Replace it before this episode is considered "
                 "written.",
                 code="WB110",
@@ -717,10 +770,10 @@ def _check_boilerplate(
                     f'"{fingerprint}"',
                     location=location,
                     line=lineno,
-                    hint="[CLDT] This looks like unedited Carpentries Workbench scaffold "
-                    "content, not real lesson material. Replace it, or delete the episode "
-                    "if it isn't ready to write yet, an empty episode is more honest than "
-                    "a filled-in-looking one that's still the template.",
+                    hint="This looks like unedited Workbench scaffold content, not real lesson "
+                    "material. Replace it, or delete the episode if it isn't ready to write "
+                    "yet: an empty episode is more honest than a filled-in-looking one that's "
+                    "still the template.",
                     code="WB111",
                 )
             )
@@ -774,15 +827,15 @@ def _check_placeholder_bullets(body: str, location: str, line_offset: int = 0) -
                     f'{reported_line}: "{bullet_raw}"',
                     location=location,
                     line=reported_line,
-                    hint="[CLDT] Replace with real content, this is scaffold placeholder "
-                    "text, not a written keypoint/objective/question.",
+                    hint="Replace with real content. This is scaffold placeholder text, not a "
+                    "written keypoint, objective, or question.",
                     code="WB112",
                 )
             )
     return findings
 
 
-def _check_contractions(body: str, location: str) -> list[Finding]:
+def _check_contractions(body: str, location: str, line_offset: int = 0) -> list[Finding]:
     """The Carpentries Lab reviewer checklist flags heavy contraction use as an
     accessibility concern for translation and ESL learners. Contractions are a
     closed set of stems (it's, don't, ...), unlike possessives (any noun + 's),
@@ -791,11 +844,15 @@ def _check_contractions(body: str, location: str) -> list[Finding]:
     in_code = _code_fence_mask(body)
     contraction_count = 0
     word_count = 0
+    first_line = None
     for i, line in enumerate(body.splitlines()):
         if in_code[i]:
             continue
         prose = INLINE_CODE_RE.sub(" ", line)
-        contraction_count += len(CONTRACTION_RE.findall(prose))
+        hits = len(CONTRACTION_RE.findall(prose))
+        if hits and first_line is None:
+            first_line = i + 1 + line_offset
+        contraction_count += hits
         word_count += len(prose.split())
 
     if word_count == 0:
@@ -809,9 +866,9 @@ def _check_contractions(body: str, location: str) -> list[Finding]:
                 f"{contraction_count} contractions found ({rate_per_1000:.1f} per 1,000 "
                 "words)",
                 location=location,
-                hint="[Carpentries Lab] Consider spelling them out (don't -> do not) for "
-                "translation and ESL learners. This threshold is a local heuristic, not "
-                "an official Carpentries rule.",
+                line=first_line,
+                hint="Consider spelling them out (don't -> do not) for translation and ESL "
+                "learners. The threshold is a local heuristic, not an official Carpentries rule.",
                 code="WB404",
             )
         ]
@@ -910,9 +967,18 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
     seen: dict[str, int] = {}
     first_heading_seen = False
     in_code = _code_fence_mask(body)
+    # Headings inside fenced divs (callout/spoiler/challenge titles) are
+    # conventionally `###` in Workbench, so they don't count toward "the
+    # episode's first heading should be H2". H1 and duplicate checks still
+    # apply to them.
+    div_depth = 0
 
     for lineno, line in enumerate(body.splitlines(), start=1):
         if in_code[lineno - 1]:
+            continue
+        fence = DIV_FENCE_RE.match(line.strip())
+        if fence:
+            div_depth = div_depth + 1 if fence.group(2) else max(0, div_depth - 1)
             continue
         match = HEADING_RE.match(line)
         if not match:
@@ -932,7 +998,7 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
                     code="WB210",
                 )
             )
-        elif not first_heading_seen and level != 2:
+        elif not first_heading_seen and div_depth == 0 and level != 2:
             findings.append(
                 Finding(
                     "warning",
@@ -945,7 +1011,7 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
                 )
             )
 
-        if level >= 2:
+        if level >= 2 and div_depth == 0:
             first_heading_seen = True
 
         if text in seen:
@@ -1021,9 +1087,8 @@ def _check_links(body: str, lesson_dir: Path, location: str, line_offset: int = 
                         f'generic link text "{text}" on line {lineno}',
                         location=location,
                         line=lineno,
-                        hint="[CLDT/Carpentries Lab] Screen readers and translation tools "
-                        "lose context with generic link text like 'click here' -- "
-                        "describe the destination.",
+                        hint="Describe the destination instead. Screen readers and translation "
+                        "tools lose context with generic link text like 'click here'.",
                         code="WB303",
                     )
                 )
@@ -1107,7 +1172,7 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
         line_offset = text[: len(text) - len(body)].count("\n")
     else:
         front_matter, body = parsed
-        findings.extend(_check_front_matter(front_matter, location))
+        findings.extend(_check_front_matter(front_matter, location, _front_matter_lines(text)))
         # Every check below reports line numbers relative to `body`, which
         # starts after the front matter -- offset them back to real file
         # line numbers, or every reported line is wrong by the front
@@ -1119,9 +1184,9 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
     findings.extend(_check_links(body, lesson_dir, location, line_offset))
     findings.extend(_check_boilerplate(front_matter, body, location, line_offset))
     findings.extend(_check_placeholder_bullets(body, location, line_offset))
-    objective_findings, objective_count = _check_objective_verbs(body, location)
+    objective_findings, objective_count = _check_objective_verbs(body, location, line_offset)
     findings.extend(objective_findings)
-    findings.extend(_check_contractions(body, location))
+    findings.extend(_check_contractions(body, location, line_offset))
 
     # [Carpentries Lab]: "All lesson and episode objectives are assessed by
     # exercises or another opportunity for formative assessment."
@@ -1133,8 +1198,8 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
                 f"{objective_count} objective(s) declared but exercises: 0 -- nothing "
                 "in this episode formally assesses them",
                 location=location,
-                hint="[Carpentries Lab] Consider adding a challenge, discussion, or "
-                "other formative-assessment checkpoint.",
+                hint="Add a challenge, discussion, or other formative-assessment checkpoint "
+                "that lets learners show each objective.",
                 code="WB403",
             )
         )
