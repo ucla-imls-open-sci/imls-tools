@@ -343,3 +343,27 @@ def test_tui_file_issues_reports_gh_failure(tmp_path, monkeypatch):
     assert seen["busy_during"] is True
     assert seen["busy_after"] is False
     assert seen["screen"] != "ConfirmIssues"
+
+
+def test_tui_file_issues_leaves_notes_out_unless_selected(tmp_path, monkeypatch):
+    _, path = checked_lesson(tmp_path)
+    results = load(path)
+    results.findings.append(Finding("info", "config", "`life_cycle` is still `pre-alpha`",
+                                    location="config.yaml", code="WB006"))
+    save(results, path)
+    gh = FakeGh()
+    monkeypatch.setattr(issues, "_gh", gh)
+    seen = {}
+
+    async def script(tui, pilot):
+        await pilot.press("c")
+        await tui.workers.wait_for_complete()
+        await pilot.pause()
+        modal = tui.screen
+        seen["notes_left"] = modal.notes_left
+        seen["titles"] = [d.title for d in modal.drafts]
+        await pilot.press("n")
+
+    run_app(path, script)
+    assert seen["notes_left"] >= 1
+    assert not any(t.startswith("config.yaml") for t in seen["titles"])

@@ -114,13 +114,14 @@ def test_check_results_override_and_quiet(tmp_path):
     assert not default_results_path(lesson_dir).exists()
 
 
-def test_check_keeps_bracketed_hint_text(tmp_path):
-    # Hints like "[CLDT] ..." must not be eaten as Rich markup tags.
-    body = CLEAN_BODY.replace("- Explain the thing.", "- Understand the thing.")
-    lesson_dir = make_lesson(tmp_path, body=body)
-    result = runner.invoke(app, ["check", str(lesson_dir)])
-    assert "WB401" in result.output
-    assert "[CLDT]" in result.output
+def test_report_keeps_bracketed_hint_text(tmp_path):
+    # Hint text with literal brackets must not be eaten as Rich markup tags.
+    f = Finding("warning", "objectives", "vague [objective]", location="episodes/01.md",
+                hint="[CLDT] see [bold]not markup[/bold]", code="WB401")
+    save(Results(target="x", lesson_dir=None, findings=[f]), default_results_path(tmp_path))
+    result = runner.invoke(app, ["report", str(tmp_path)])
+    assert "vague [objective]" in result.output
+    assert "[CLDT] see [bold]not markup[/bold]" in result.output
 
 
 def test_check_source_shows_the_offending_line(tmp_path):

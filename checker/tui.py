@@ -65,11 +65,12 @@ class ConfirmIssues(ModalScreen[bool]):
                border: thick $warning; background: $surface; padding: 1 2; }
     """
 
-    def __init__(self, repo: str, drafts: list[issues_mod.IssueDraft], skipped: int) -> None:
+    def __init__(self, repo: str, drafts: list[issues_mod.IssueDraft], skipped: int, notes_left: int = 0) -> None:
         super().__init__()
         self.repo = repo
         self.drafts = drafts
         self.skipped = skipped
+        self.notes_left = notes_left
 
     def compose(self) -> ComposeResult:
         lines = Text.assemble((f"File {len(self.drafts)} issue(s) in {self.repo}?\n\n", "bold"))
@@ -78,6 +79,9 @@ class ConfirmIssues(ModalScreen[bool]):
             lines.append(f"[{len(d.findings)} item(s); {', '.join(d.labels)}]\n", style="dim")
         if self.skipped:
             lines.append(f"\n{self.skipped} finding(s) skipped, already in a wbcheck issue.\n", style="dim")
+        if self.notes_left:
+            lines.append(f"\n{self.notes_left} note(s) left out; select notes with space to file them.\n",
+                         style="dim")
         lines.append("\ny: file them    n: cancel", style="bold")
         yield VerticalScroll(Static(lines), id="confirm")
 
@@ -420,6 +424,7 @@ class FindingsApp(App):
         except issues_mod.GhError as exc:
             self.call_from_thread(self._gh_failed, exc)
             return
+        notes_left = 0
         if selection is not None:
             fresh = [f for f in selection if f.id not in already]
             skipped = len(selection) - len(fresh)
@@ -430,13 +435,19 @@ class FindingsApp(App):
                 github_base=self.results.github_base, dirty_files=self.results.dirty_files,
                 generated=self.results.generated,
             )
-            drafts, skipped = issues_mod.plan_issues(subset, min_severity="info", already_filed=already)
-        self.call_from_thread(self._confirm_issues, repo, drafts, skipped)
+            # Notes are informational: never file them unless explicitly selected.
+            min_sev = "error" if self.min_severity == "error" else "warning"
+            drafts, skipped = issues_mod.plan_issues(subset, min_severity=min_sev, already_filed=already)
+            notes_left = sum(1 for f in visible if f.severity == "info")
+        self.call_from_thread(self._confirm_issues, repo, drafts, skipped, notes_left)
 
-    def _confirm_issues(self, repo: str, drafts: list[issues_mod.IssueDraft], skipped: int) -> None:
+    def _confirm_issues(
+        self, repo: str, drafts: list[issues_mod.IssueDraft], skipped: int, notes_left: int = 0
+    ) -> None:
         self._set_busy(None)
         if not drafts:
-            self.notify(f"Nothing new to file ({skipped} already filed).")
+            notes = f"; {notes_left} note(s) not filed unless selected" if notes_left else ""
+            self.notify(f"Nothing new to file ({skipped} already filed{notes}).")
             return
 
         def _answer(confirmed: bool | None) -> None:
@@ -444,7 +455,7 @@ class FindingsApp(App):
                 self._set_busy(f"Filing {len(drafts)} issue(s) in {repo}…")
                 self._create_issues(repo, drafts)
 
-        self.push_screen(ConfirmIssues(repo, drafts, skipped), _answer)
+        self.push_screen(ConfirmIssues(repo, drafts, skipped, notes_left), _answer)
 
     @work(thread=True, exclusive=True, group="gh")
     def _create_issues(self, repo: str, drafts: list[issues_mod.IssueDraft]) -> None:
