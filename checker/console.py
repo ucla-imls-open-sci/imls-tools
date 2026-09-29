@@ -73,6 +73,8 @@ def render_header(console: Console, results: Results) -> None:
         (", ", "dim"),
         (f"{counts['info']} note(s)", SEVERITY_STYLE["info"] if counts["info"] else "dim"),
     )
+    if results.ignored:
+        summary.append(f" · {results.ignored} ignored via .wbcheck.toml", style="dim")
     console.print(summary)
 
 

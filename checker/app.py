@@ -25,6 +25,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from checker import __version__
 from checker.cli import _blame_map, _dirty_files, _github_blob_base, _read_glossary, _resolve_target
 from checker.console import render_ai_reviews, render_findings, render_results
+from checker.ignore import IgnoreRules, load_ignore
 from checker.lesson_check import read_lesson_metadata, run_checks
 from checker.report import (
     Finding,
@@ -71,6 +72,14 @@ def _results_path_for(lesson_dir: Path, is_clone: bool, override: Path | None) -
     return default_results_path(Path.cwd() if is_clone else lesson_dir)
 
 
+def _load_ignore_or_exit(lesson_dir: Path) -> IgnoreRules:
+    try:
+        return load_ignore(lesson_dir)
+    except ValueError as exc:
+        err.print(f"[red]{exc}[/]")
+        raise typer.Exit(2) from exc
+
+
 def _run_check(
     target: str, episode: str | None, blame: bool
 ) -> tuple[Results, Path, tempfile.TemporaryDirectory | None]:
@@ -78,7 +87,7 @@ def _run_check(
     and the temp-clone handle (None for a local path) for the caller to
     clean up."""
     lesson_dir, tmp = _resolve_target(target)
-    findings = run_checks(lesson_dir, episode_filter=episode)
+    findings, ignored = _load_ignore_or_exit(lesson_dir).apply(run_checks(lesson_dir, episode_filter=episode))
     github_base = _github_blob_base(lesson_dir)
     results = Results(
         target=target,
@@ -88,6 +97,7 @@ def _run_check(
         blame=_blame_map(lesson_dir, findings) if blame else None,
         github_base=github_base,
         dirty_files=sorted(_dirty_files(lesson_dir)) if github_base else [],
+        ignored=ignored,
     )
     if blame and not results.blame:
         err.print("[yellow]--blame found no authors[/] (is the lesson a git repo with history?)")
@@ -207,7 +217,11 @@ def review(
         results.findings = [
             f for f in results.findings if not (f.source == "ai" and f.location in reviewed)
         ] + new_findings
+        # Filter after numbering: ignore-file IDs were recorded post-numbering.
         assign_occurrences(results.findings)
+        results.findings, ignored_ai = _load_ignore_or_exit(lesson_dir).apply(results.findings)
+        results.ignored += ignored_ai
+        new_findings = [f for f in new_findings if f in results.findings]
         save(results, path)
 
         console = Console()
@@ -347,7 +361,8 @@ def issues(
     already: set[str] = set()
     if target_repo:
         try:
-            already = filed_ids(target_repo)
+            with err.status(f"Checking {target_repo} for already-filed findings…"):
+                already = filed_ids(target_repo)
         except GhError as exc:
             if create:
                 err.print(f"[red]can't read existing issues in {target_repo}:[/] {exc}")
@@ -395,13 +410,46 @@ def issues(
         raise typer.Exit(1)
     assert target_repo is not None
     try:
-        ensure_labels(target_repo, {label for d in drafts for label in d.labels})
-        for d in drafts:
-            url = create_issue(target_repo, d)
-            console.print(f"[green]filed[/] {url}  {d.title}")
+        with err.status(f"Filing {len(drafts)} issue(s) in {target_repo}…") as status:
+            ensure_labels(target_repo, {label for d in drafts for label in d.labels})
+            for n, d in enumerate(drafts, 1):
+                status.update(f"Filing {n}/{len(drafts)}: {d.title}")
+                url = create_issue(target_repo, d)
+                console.print(f"[green]filed[/] {url}  {d.title}")
     except GhError as exc:
         err.print(f"[red]gh failed:[/] {exc}")
         raise typer.Exit(1) from exc
+
+
+@app.command()
+def tui(
+    lesson: Annotated[Path, typer.Argument(help="Lesson directory whose saved results to browse.")] = Path("."),
+    results_path: Annotated[
+        Path | None, typer.Option("--results", help="Results file (default: <lesson>/.wbcheck/results.json).")
+    ] = None,
+) -> None:
+    """Browse and triage saved findings: filter, select, ignore, open in $EDITOR, file issues.
+
+    Runs `check` first if there are no saved results for the lesson.
+    """
+    from checker.tui import run
+
+    path = results_path or default_results_path(lesson)
+    if not path.exists():
+        if results_path is not None:
+            err.print(f"[red]no results at[/] {path}")
+            raise typer.Exit(2)
+        err.print("[dim]no saved results, running checks first[/]")
+        results, _, tmp = _run_check(str(lesson), None, blame=False)
+        if tmp is not None:
+            tmp.cleanup()
+        save(results, path)
+    try:
+        results = load(path)
+    except ValueError as exc:
+        err.print(f"[red]{exc}[/]")
+        raise typer.Exit(2) from exc
+    run(results, path)
 
 
 def main() -> None:

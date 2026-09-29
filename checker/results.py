@@ -53,6 +53,7 @@ class Results:
     github_base: str | None = None
     dirty_files: list[str] = field(default_factory=list)
     ai_reviews: dict[str, str] = field(default_factory=dict)
+    ignored: int = 0  # findings suppressed by the lesson's .wbcheck.toml
     generated: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     @property
@@ -81,6 +82,7 @@ class Results:
             },
             "findings": [f.to_dict() for f in self.findings],
             "ai_reviews": self.ai_reviews,
+            "ignored": self.ignored,
         }
         # default=str: config.yaml's unquoted `created:` is a datetime.date.
         return json.dumps(payload, indent=2, default=str)
@@ -105,6 +107,7 @@ class Results:
             github_base=git.get("github_base"),
             dirty_files=list(git.get("dirty_files") or []),
             ai_reviews=dict(data.get("ai_reviews") or {}),
+            ignored=int(data.get("ignored") or 0),
             generated=data.get("generated") or "",
         )
 

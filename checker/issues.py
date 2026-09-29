@@ -16,6 +16,7 @@ and a finding closed as won't-fix stays closed.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -187,6 +188,22 @@ def plan_issues(
         drafts.append(IssueDraft(key, _title(key, findings), _body(key, findings, results), labels, findings))
     drafts.sort(key=lambda d: (min(SEVERITY_ORDER.get(f.severity, 9) for f in d.findings), d.key))
     return drafts, skipped
+
+
+def draft_for_findings(results: Results, findings: list[Finding]) -> IssueDraft:
+    """One issue covering exactly `findings` (e.g. a hand-picked selection
+    in the TUI), regardless of the usual grouping."""
+    if not findings:
+        raise ValueError("no findings to draft an issue for")
+    locations = sorted({f.location or "lesson" for f in findings})
+    codes = ", ".join(sorted({f.code or f.category for f in findings}))
+    if len(locations) == 1:
+        title = f"{locations[0]}: {_counts_label(findings)} ({codes})"
+    else:
+        title = f"{_counts_label(findings)} across {len(locations)} files ({codes})"
+    key = "selection:" + hashlib.sha1(",".join(sorted(f.id for f in findings)).encode()).hexdigest()[:12]
+    labels = [WBCHECK_LABEL] + ([AI_LABEL] if any(f.source == "ai" for f in findings) else [])
+    return IssueDraft(key, title, _body(key, findings, results), labels, list(findings))
 
 
 # -- GitHub, via the gh CLI ------------------------------------------------------
