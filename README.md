@@ -275,7 +275,7 @@ episode picker is gone in favor of `--episode <name>` (scripting-friendly,
 and doesn't hardcode a contributor's home directory the way the old shell
 script did).
 
-`proposal_analysis.ipynb` (scores lesson proposal PDFs against a rubric via
+`legacy/proposal_analysis.ipynb` (scores lesson proposal PDFs against a rubric via
 the OpenAI API) is unrelated to lesson checking and untouched here — it
 still uses the legacy `openai.Completion.create` API and could use its own
 pass at some point.
