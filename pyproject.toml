@@ -4,7 +4,7 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 120  # existing hint/error strings are prose, not code; 88 would
                     # force ugly mid-sentence wraps for no real readability gain
-extend-exclude = ["proposal_analysis.ipynb"]  # unrelated exploratory notebook, not part of the checker package
+extend-exclude = ["legacy/"]  # unrelated exploratory notebook, not part of the checker package
 
 [tool.ruff.lint]
 select = [
