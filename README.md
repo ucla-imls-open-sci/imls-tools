@@ -73,6 +73,36 @@ wbcheck report ./my-lesson --html report.html --open
 wbcheck report ./my-lesson --pdf report.pdf
 ```
 
+#### Filing findings as GitHub issues
+
+```bash
+wbcheck issues ./my-lesson                     # dry run: table of the issues it would file
+wbcheck issues ./my-lesson --preview           # ...and print each issue body
+wbcheck issues ./my-lesson --create            # file them via `gh` (asks to confirm; -y skips)
+wbcheck issues ./my-lesson --group-by rule     # one issue per rule code across files instead
+wbcheck issues ./my-lesson --source ai --min-severity info --repo me/my-fork
+```
+
+Each issue is sized for one pull request:
+- By default, mechanical findings are grouped one issue per file. AI findings
+  are grouped per file and `scope`, the model's own label for "fix these
+  together". An episode's one-off AI suggestions are folded into a single
+  "other suggestions" issue.
+- Each item has a checkbox, a link to the exact line at the checked commit,
+  the quote (for AI findings), and the fix. A "Why these matter" section
+  cites the guide for each rule code.
+- AI issues get an `ai-suggested` label and a note saying the judgment is a
+  suggestion to verify.
+- Notes (`info`) are left out unless you pass `--min-severity info`.
+
+**Re-running never duplicates.** Every finding's stable ID is embedded in the
+issue body as a hidden comment. Before filing, `wbcheck issues` reads every
+`wbcheck`-labelled issue in the repo, open or closed, and leaves out findings
+already filed, so a finding closed as won't-fix stays closed. The target repo
+defaults to the lesson's GitHub `origin`. Files with uncommitted changes at
+check time can't be linked, and `issues` warns about them first. Needs the
+[GitHub CLI](https://cli.github.com), logged in.
+
 Rule codes in the terminal report link to their guide section in terminals
 that support hyperlinks (iTerm2, Ghostty, WezTerm, VS Code, recent GNOME
 Terminal).
