@@ -11,7 +11,7 @@ Numbering (see issue #23):
   WB2xx  fenced divs and headings
   WB3xx  links and images
   WB4xx  objectives and style
-  AIxxx  reserved for AI review findings
+  AI2xx  AI review findings, one code per review area (checker/ai_review.py)
 
 Guide anchors were checked against the live pages on 2026-09-29:
 sandpaper-docs, the Collaborative Lesson Development Training (CLDT)
@@ -168,7 +168,31 @@ _RULES: tuple[Rule, ...] = (
          (G_LAB_REV_ACCESS,)),
 )
 
-RULES: dict[str, Rule] = {rule.code: rule for rule in _RULES}
+# -- AI2xx: AI review areas (checker/ai_review.py AREA_CODES) -------------------
+_AI_RULES: tuple[Rule, ...] = (
+    Rule("AI201", "ai-objectives", "objective not observable or not assessed",
+         "Objectives should describe observable outcomes the episode actually assesses.",
+         (G_CLDT_SMART, G_LAB_REV_DESIGN)),
+    Rule("AI202", "ai-assessment", "exercise lacks diagnostic power or variety",
+         "Exercises should test each objective and reveal specific misconceptions.",
+         (G_CLDT_ASSESS, G_LAB_ED_CONTENT)),
+    Rule("AI203", "ai-audience", "difficulty or pacing mismatched to audience",
+         "Unstated expert assumptions and sudden jumps lose novice learners.", (G_CLDT_EPISODES,)),
+    Rule("AI204", "ai-cognitive-load", "episode covers too much at once",
+         "Too many new ideas, or ideas before worked examples, overload learners.", (G_CLDT_EPISODES,)),
+    Rule("AI205", "ai-tone", "dismissive language, idioms, or unexplained jargon",
+         "Words like 'simply' and 'just' discourage learners who find a step hard.",
+         (G_LAB_REV_ACCESS, G_CLDT_ACCESS)),
+    Rule("AI206", "ai-glossary-gap", "term needs a glossary entry",
+         "The Lab checklist expects no key terms missing from the glossary.",
+         (G_LAB_REV_SUPPORT, G_CLDT_GLOSSARY)),
+    Rule("AI207", "ai-accessibility", "figure or content not accessible",
+         "Alt text and non-color cues are how some learners get the content.", (G_LAB_REV_ACCESS,)),
+    Rule("AI208", "ai-accuracy", "statement or code looks incorrect",
+         "Errors in lesson content become learner misconceptions.", (G_LAB_ED_CONTENT,)),
+)
+
+RULES: dict[str, Rule] = {rule.code: rule for rule in _RULES + _AI_RULES}
 
 
 def get_rule(code: str | None) -> Rule | None:

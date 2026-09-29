@@ -8,7 +8,7 @@ license = "BSD-3-Clause"
 license-file = "LICENSE"
 
 [tasks]
-# Run the checker: pixi run check <path-or-git-url> [--ai] [--backend ollama|claude|codex] ...
+# Run the checker: pixi run check <path-or-git-url> [--ai] [--backend ollama|claude] ...
 check = "python -m checker.cli"
 
 # New subcommand CLI (issue #24): wbcheck check|review|report. Also runnable as
@@ -24,32 +24,32 @@ lint = "ruff check checker tests"
 lint-fix = "ruff check checker tests --fix"
 format = "ruff format checker tests"
 
+# Re-fetch the guidance excerpts the AI review pins into its prompt
+# (checker/rubric/*.md). Review the diff before committing.
+refresh-rubric = "python scripts/refresh_rubric.py"
+
 # Pull the recommended local models (sized for a 16GB M2 Mac -- see README).
-pull-models = "ollama pull nomic-embed-text && ollama pull qwen3.5:9b-q4_K_M"
-pull-models-small = "ollama pull nomic-embed-text && ollama pull qwen3.5:4b"
+pull-models = "ollama pull qwen3.5:9b-q4_K_M"
+pull-models-small = "ollama pull qwen3.5:4b"
 pull-models-coding = "ollama pull qwen2.5-coder:7b"
 
-# Start the local Ollama server (needed for --backend ollama and for the
-# local embeddings step, which every backend uses for retrieval).
+# Start the local Ollama server (needed only for --backend ollama).
 ollama-serve = "ollama serve"
 
 [dependencies]
 python = "3.12.*"
 ollama = ">=0.30.4,<0.31"
-beautifulsoup4 = ">=4.15.0,<5"
+beautifulsoup4 = ">=4.15.0,<5"  # scripts/refresh_rubric.py only
 ruff = ">=0.14.0,<0.15"
 rich = ">=15.0.0,<16"
 typer = ">=0.27.2,<0.28"
 
 [pypi-dependencies]
-langchain = ">=1.3.16, <2"
-langchain-community = ">=0.4.2, <0.5"
-langchain-ollama = ">=1.1.0, <2"
-chromadb = ">=1.5.9, <2"
-tiktoken = ">=0.14.0, <0.15"
 anthropic = ">=0.125.0, <0.126"
+# Python client for the local Ollama server (the conda `ollama` above is the server itself).
+ollama = ">=0.6.3, <0.7"
+pydantic = ">=2.13, <3"
 pyyaml = ">=6.0.3, <7"
-langchain-chroma = ">=1.1.0, <2"
 pytest = ">=9.1.1, <10"
 # Installs this repo in editable mode so the `wbcheck` console script is on PATH.
 carpentries-workbench-checker = { path = ".", editable = true }

@@ -83,6 +83,7 @@ class Finding:
     code: str | None = None  # e.g. "WB112", see checker/rules.py
     quote: str | None = None
     source: str = "mechanical"
+    scope: str | None = None  # AI findings: groups related findings into one PR-sized issue
     # Nth repeat (in file order) of an otherwise-identical finding in the
     # same file, e.g. the 3rd duplicate `Exercise:` heading; set by
     # assign_occurrences(), 0 for the first/only one.
@@ -395,7 +396,8 @@ def _render_file_finding_group(
         icon = SEVERITY_ICON_PLAIN.get(f.severity, "")
         prefix = "- [ ]" if f.severity in ("error", "warning") else "-"
         where = _markdown_location_link(f.location or "General", f.line, github_base, dirty_files)
-        lines.append(f"> {prefix} {icon} {where} — `{_code_label(f)}` {f.message}")
+        quote = f' _“{f.quote}”_' if f.quote else ""
+        lines.append(f"> {prefix} {icon} {where} — `{_code_label(f)}` {f.message}{quote}")
     if guide_link:
         lines.append(">")
         lines.append(f"> **Guide:**{guide_link}")

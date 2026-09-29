@@ -170,28 +170,54 @@ def test_report_html_when_quarto_missing_warns(tmp_path, monkeypatch):
 # -- review --------------------------------------------------------------------
 
 
-def test_review_merges_ai_output_into_saved_results(tmp_path, monkeypatch):
+def _fake_result(location, quote="Some content."):
+    from checker.ai_review import ReviewResult
+
+    return ReviewResult(
+        summary="**Objectives** look assessable.",
+        findings=[
+            Finding("warning", "ai", "Too terse for novices.", location=location, line=13,
+                    hint="Add a worked example.", code="AI203", quote=quote, source="ai", scope="pacing")
+        ],
+    )
+
+
+def test_review_adds_structured_ai_findings_to_saved_results(tmp_path, monkeypatch):
     lesson_dir = make_lesson(tmp_path)
     runner.invoke(app, ["check", str(lesson_dir), "--quiet"])
     calls = []
 
-    def fake_review(text, findings, backend, model, embed_model, glossary_text):
-        calls.append((backend, glossary_text))
-        return "**Objectives** look assessable."
+    def fake_review(text, location, mechanical, backend, model=None, glossary_text="", effort="high"):
+        calls.append((location, backend, glossary_text, effort))
+        return _fake_result(location)
 
     monkeypatch.setattr("checker.ai_review.review_episode", fake_review)
-    result = runner.invoke(app, ["review", str(lesson_dir), "--backend", "claude"])
+    result = runner.invoke(app, ["review", str(lesson_dir), "--backend", "claude", "--effort", "medium"])
     assert result.exit_code == 0, result.output
-    assert calls and calls[0][0] == "claude"
-    assert "Term" in calls[0][1]  # glossary passed through
-    assert load(default_results_path(lesson_dir)).ai_reviews == {
-        "01.md (claude)": "**Objectives** look assessable."
-    }
-    assert "look assessable" in result.output
+    location, backend, glossary, effort = calls[0]
+    assert (location, backend, effort) == ("episodes/01.md", "claude", "medium")
+    assert "Term" in glossary
+    saved = load(default_results_path(lesson_dir))
+    [f] = [f for f in saved.findings if f.source == "ai"]
+    assert (f.code, f.scope, f.quote) == ("AI203", "pacing", "Some content.")
+    assert saved.ai_reviews["01.md (claude)"].startswith("**Objectives**")
+    assert "AI203" in result.output
 
 
-def test_review_records_backend_failure_without_crashing(tmp_path, monkeypatch):
+def test_review_replaces_earlier_ai_findings_for_the_episode(tmp_path, monkeypatch):
     lesson_dir = make_lesson(tmp_path)
+    monkeypatch.setattr("checker.ai_review.review_episode", lambda *a, **k: _fake_result(a[1], quote="first"))
+    runner.invoke(app, ["review", str(lesson_dir)])
+    monkeypatch.setattr("checker.ai_review.review_episode", lambda *a, **k: _fake_result(a[1], quote="second"))
+    runner.invoke(app, ["review", str(lesson_dir)])
+    quotes = [f.quote for f in load(default_results_path(lesson_dir)).findings if f.source == "ai"]
+    assert quotes == ["second"]
+
+
+def test_review_failure_keeps_earlier_ai_findings(tmp_path, monkeypatch):
+    lesson_dir = make_lesson(tmp_path)
+    monkeypatch.setattr("checker.ai_review.review_episode", lambda *a, **k: _fake_result(a[1], quote="kept"))
+    runner.invoke(app, ["review", str(lesson_dir)])
 
     def boom(*args, **kwargs):
         raise ConnectionError("ollama not running")
@@ -199,10 +225,16 @@ def test_review_records_backend_failure_without_crashing(tmp_path, monkeypatch):
     monkeypatch.setattr("checker.ai_review.review_episode", boom)
     result = runner.invoke(app, ["review", str(lesson_dir)])
     assert result.exit_code == 0
-    reviews = load(default_results_path(lesson_dir)).ai_reviews
-    assert reviews["01.md (ollama)"].startswith("(AI review failed: ollama not running")
+    saved = load(default_results_path(lesson_dir))
+    assert saved.ai_reviews["01.md (ollama)"].startswith("(AI review failed: ollama not running")
+    assert [f.quote for f in saved.findings if f.source == "ai"] == ["kept"]
+
+
+def test_review_rejects_unknown_effort(tmp_path):
+    result = runner.invoke(app, ["review", str(make_lesson(tmp_path)), "--effort", "extreme"])
+    assert result.exit_code == 2
 
 
 def test_review_rejects_unknown_backend(tmp_path):
-    result = runner.invoke(app, ["review", str(make_lesson(tmp_path)), "--backend", "gpt9"])
+    result = runner.invoke(app, ["review", str(make_lesson(tmp_path)), "--backend", "codex"])
     assert result.exit_code == 2

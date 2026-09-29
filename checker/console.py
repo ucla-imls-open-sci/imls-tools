@@ -103,6 +103,8 @@ def render_findings(console: Console, results: Results, show_source: bool = Fals
         for f in sorted(items, key=lambda x: (x.line if x.line is not None else -1, x.severity)):
             style = SEVERITY_STYLE.get(f.severity, "")
             body: list = [Text(f.message)]
+            if f.quote:
+                body.append(Text(f"“{f.quote}”", style="italic"))
             if f.hint:
                 body.append(Text(f.hint, style="dim"))
             if show_source:
