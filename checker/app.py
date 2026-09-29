@@ -28,6 +28,7 @@ from checker.console import render_ai_reviews, render_findings, render_results
 from checker.ignore import IgnoreRules, load_ignore
 from checker.lesson_check import read_lesson_metadata, run_checks
 from checker.report import (
+    SEVERITY_ORDER,
     Finding,
     assign_occurrences,
     render_html_via_quarto,
@@ -40,7 +41,7 @@ app = typer.Typer(
     name="wbcheck",
     help="Fast local checks for Carpentries Workbench lessons, with an optional AI review.",
     no_args_is_help=True,
-    add_completion=False,
+    add_completion=True,
     rich_markup_mode="rich",
 )
 
@@ -80,6 +81,17 @@ def _load_ignore_or_exit(lesson_dir: Path) -> IgnoreRules:
         raise typer.Exit(2) from exc
 
 
+FAIL_ON = ("error", "warning", "info", "never")
+
+
+def _fails(results: Results, fail_on: str) -> bool:
+    """Whether any finding is at least as severe as `fail_on`."""
+    if fail_on == "never":
+        return False
+    threshold = SEVERITY_ORDER[fail_on]
+    return any(SEVERITY_ORDER.get(f.severity, 9) <= threshold for f in results.findings)
+
+
 def _run_check(
     target: str, episode: str | None, blame: bool
 ) -> tuple[Results, Path, tempfile.TemporaryDirectory | None]:
@@ -114,8 +126,15 @@ def check(
     ] = None,
     show_source: Annotated[bool, typer.Option("--source", help="Show the source line under each finding.")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Save results without printing the report.")] = False,
+    fail_on: Annotated[
+        str,
+        typer.Option(help="Exit 1 if any finding is at least this severe: error, warning, info, or never."),
+    ] = "error",
 ) -> None:
-    """Run the fast mechanical checks and save the results. Exits 1 if any error was found."""
+    """Run the fast mechanical checks and save the results. Exits 1 on errors (see --fail-on)."""
+    if fail_on not in FAIL_ON:
+        err.print(f"[red]--fail-on must be one of {', '.join(FAIL_ON)}[/], got `{fail_on}`")
+        raise typer.Exit(2)
     results, lesson_dir, tmp = _run_check(target, episode, blame)
     try:
         path = save(results, _results_path_for(lesson_dir, tmp is not None, results_path))
@@ -125,7 +144,7 @@ def check(
     finally:
         if tmp is not None:
             tmp.cleanup()
-    raise typer.Exit(1 if results.error_count else 0)
+    raise typer.Exit(1 if _fails(results, fail_on) else 0)
 
 
 AI_BACKENDS = ("ollama", "claude")  # mirrors checker.ai_review.BACKENDS, kept here so importing
@@ -323,8 +342,12 @@ def issues(
         str | None, typer.Option(help="owner/name to file in (default: the lesson's GitHub origin).")
     ] = None,
     group_by: Annotated[
-        str, typer.Option(help="file: one issue per file (AI: per file + scope); rule: one per code.")
-    ] = "file",
+        str,
+        typer.Option(
+            help="auto: one issue per rule when it appears in 3+ files, else per file; "
+            "file: one issue per file; rule: one per code. AI findings group by file + scope."
+        ),
+    ] = "auto",
     min_severity: Annotated[str, typer.Option(help="Lowest severity to include: error, warning, or info.")] = "warning",
     source: Annotated[str, typer.Option(help="Which findings: all, mechanical, or ai.")] = "all",
     preview: Annotated[bool, typer.Option("--preview", help="Print each issue body, not just the titles.")] = False,
@@ -341,8 +364,8 @@ def issues(
 
     from checker.issues import GhError, create_issue, ensure_labels, filed_ids, plan_issues, repo_from_results
 
-    if group_by not in ("file", "rule"):
-        err.print(f"[red]--group-by must be file or rule[/], got `{group_by}`")
+    if group_by not in ("auto", "file", "rule"):
+        err.print(f"[red]--group-by must be auto, file, or rule[/], got `{group_by}`")
         raise typer.Exit(2)
     if min_severity not in ("error", "warning", "info"):
         err.print(f"[red]--min-severity must be error, warning, or info[/], got `{min_severity}`")

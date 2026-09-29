@@ -1,7 +1,10 @@
 """Turn saved results into GitHub issues sized for one pull request each (#21).
 
 Grouping:
-  file (default)  mechanical findings: one issue per file.
+  auto (default)  a mechanical rule found in AUTO_RULE_MIN_FILES or more files
+                  gets one lesson-wide issue (e.g. "rewrite vague objectives");
+                  everything else is grouped as `file`.
+  file            mechanical findings: one issue per file.
                   AI findings: one issue per (file, scope), the model's own
                   label for "fix these together".
   rule            one issue per rule code, across files (e.g. every missing
@@ -32,6 +35,7 @@ AI_LABEL = "ai-suggested"
 LABEL_COLORS = {WBCHECK_LABEL: "5319e7", AI_LABEL: "fbca04"}
 ID_MARKER_RE = re.compile(r"<!-- wbcheck:id=([0-9a-f]{12}) -->")
 OTHER_SCOPE = "other suggestions"
+AUTO_RULE_MIN_FILES = 3
 TOOL_URL = "https://github.com/ucla-imls-open-sci/carpentries-workbench-checker"
 _GITHUB_BASE_RE = re.compile(r"^https://github\.com/(?P<repo>[^/]+/[^/]+)/blob/(?P<sha>[0-9a-f]+)$")
 
@@ -77,10 +81,17 @@ def _counts_label(findings: list[Finding]) -> str:
 
 
 def _group(findings: list[Finding], group_by: str) -> dict[str, list[Finding]]:
+    wide_codes: set[str] = set()
+    if group_by == "auto":
+        files_per_code: dict[str, set[str]] = {}
+        for f in findings:
+            if f.source != "ai" and f.code:
+                files_per_code.setdefault(f.code, set()).add(f.location or "lesson")
+        wide_codes = {c for c, files in files_per_code.items() if len(files) >= AUTO_RULE_MIN_FILES}
     groups: dict[str, list[Finding]] = {}
     for f in findings:
         location = f.location or "lesson"
-        if group_by == "rule":
+        if group_by == "rule" or (f.code in wide_codes and f.source != "ai"):
             key = f"rule:{f.code or f.category}"
         elif f.source == "ai":
             key = f"ai:{location}:{(f.scope or 'general').strip().lower()}"
@@ -163,7 +174,7 @@ def _body(key: str, findings: list[Finding], results: Results) -> str:
 
 def plan_issues(
     results: Results,
-    group_by: str = "file",
+    group_by: str = "auto",
     min_severity: str = "warning",
     source: str = "all",
     already_filed: set[str] | None = None,
@@ -171,8 +182,8 @@ def plan_issues(
     """Issue drafts for `results`, skipping findings below `min_severity`,
     from other sources, or already filed. Returns the drafts and how many
     findings were skipped as already filed."""
-    if group_by not in ("file", "rule"):
-        raise ValueError(f"unknown group_by `{group_by}`, expected file or rule")
+    if group_by not in ("auto", "file", "rule"):
+        raise ValueError(f"unknown group_by `{group_by}`, expected auto, file, or rule")
     threshold = SEVERITY_ORDER[min_severity]
     filed = already_filed or set()
     selected = [
