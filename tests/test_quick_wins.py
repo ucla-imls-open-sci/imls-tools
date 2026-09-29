@@ -3,6 +3,7 @@ auto issue grouping, and the heading-level-jump check (WB213)."""
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -26,7 +27,10 @@ def test_version_matches_pixi_workspace_and_cli():
 
 
 def test_shell_completion_is_offered():
-    assert "--install-completion" in runner.invoke(app, ["--help"]).output
+    # CI forces color, and Rich styles each dash-separated piece of an option
+    # name separately, so strip ANSI codes before matching.
+    help_text = re.sub(r"\x1b\[[0-9;]*m", "", runner.invoke(app, ["--help"]).output)
+    assert "--install-completion" in help_text
 
 
 # -- --fail-on -----------------------------------------------------------------
