@@ -299,6 +299,111 @@ def report(
             err.print("[yellow]--open:[/] no HTML report was rendered, nothing to open")
 
 
+@app.command()
+def issues(
+    lesson: Annotated[Path, typer.Argument(help="Lesson directory whose saved results to file.")] = Path("."),
+    results_path: Annotated[
+        Path | None, typer.Option("--results", help="Results file (default: <lesson>/.wbcheck/results.json).")
+    ] = None,
+    repo: Annotated[
+        str | None, typer.Option(help="owner/name to file in (default: the lesson's GitHub origin).")
+    ] = None,
+    group_by: Annotated[
+        str, typer.Option(help="file: one issue per file (AI: per file + scope); rule: one per code.")
+    ] = "file",
+    min_severity: Annotated[str, typer.Option(help="Lowest severity to include: error, warning, or info.")] = "warning",
+    source: Annotated[str, typer.Option(help="Which findings: all, mechanical, or ai.")] = "all",
+    preview: Annotated[bool, typer.Option("--preview", help="Print each issue body, not just the titles.")] = False,
+    create: Annotated[bool, typer.Option("--create", help="Actually file the issues with gh.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt with --create.")] = False,
+) -> None:
+    """Group saved findings into pull-request-sized GitHub issues.
+
+    Dry run by default: shows what would be filed. Findings already in an
+    issue labelled `wbcheck` (open or closed) are skipped, so re-running is safe.
+    """
+    from rich.markdown import Markdown
+    from rich.table import Table
+
+    from checker.issues import GhError, create_issue, ensure_labels, filed_ids, plan_issues, repo_from_results
+
+    if group_by not in ("file", "rule"):
+        err.print(f"[red]--group-by must be file or rule[/], got `{group_by}`")
+        raise typer.Exit(2)
+    if min_severity not in ("error", "warning", "info"):
+        err.print(f"[red]--min-severity must be error, warning, or info[/], got `{min_severity}`")
+        raise typer.Exit(2)
+    if source not in ("all", "mechanical", "ai"):
+        err.print(f"[red]--source must be all, mechanical, or ai[/], got `{source}`")
+        raise typer.Exit(2)
+
+    path = results_path or default_results_path(lesson)
+    if not path.exists():
+        err.print(f"[red]no results at[/] {path}. Run [bold]wbcheck check {lesson}[/] first.")
+        raise typer.Exit(2)
+    results = load(path)
+
+    target_repo = repo or repo_from_results(results)
+    already: set[str] = set()
+    if target_repo:
+        try:
+            already = filed_ids(target_repo)
+        except GhError as exc:
+            if create:
+                err.print(f"[red]can't read existing issues in {target_repo}:[/] {exc}")
+                raise typer.Exit(1) from exc
+            err.print(f"[yellow]couldn't check {target_repo} for already-filed findings:[/] {exc}")
+    elif create:
+        err.print("[red]no GitHub repo[/]: the lesson has no github.com origin; pass --repo owner/name")
+        raise typer.Exit(2)
+
+    drafts, skipped = plan_issues(results, group_by, min_severity, source, already)
+    console = Console()
+    where = target_repo or "(no repo)"
+    if not drafts:
+        note = f" ({skipped} finding(s) already filed)." if skipped else "."
+        console.print(f"Nothing new to file in {where}{note}")
+        return
+
+    table = Table(title=f"{len(drafts)} issue(s) for {where}", title_justify="left", show_lines=False)
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Title")
+    table.add_column("Items", justify="right")
+    table.add_column("Labels", style="dim")
+    for i, d in enumerate(drafts, 1):
+        table.add_row(str(i), d.title, str(len(d.findings)), ", ".join(d.labels))
+    console.print(table)
+    if skipped:
+        console.print(f"[dim]{skipped} finding(s) skipped, already in a wbcheck issue.[/]")
+    dirty = sorted({f.location for d in drafts for f in d.findings if f.location in set(results.dirty_files)})
+    if dirty:
+        err.print(
+            f"[yellow]{len(dirty)} file(s) had uncommitted changes at check time[/] "
+            f"({', '.join(dirty)}); their items won't link to GitHub. Commit, push, and re-run "
+            "`wbcheck check` first if you want links."
+        )
+    if preview:
+        for i, d in enumerate(drafts, 1):
+            console.rule(f"[bold]{i}. {d.title}", align="left")
+            console.print(Markdown(d.body))
+
+    if not create:
+        err.print("[dim]dry run: nothing filed. Add --preview to read the bodies, --create to file them.[/]")
+        return
+    if not yes and not typer.confirm(f"File {len(drafts)} issue(s) in {target_repo}?", default=False):
+        err.print("not filed")
+        raise typer.Exit(1)
+    assert target_repo is not None
+    try:
+        ensure_labels(target_repo, {label for d in drafts for label in d.labels})
+        for d in drafts:
+            url = create_issue(target_repo, d)
+            console.print(f"[green]filed[/] {url}  {d.title}")
+    except GhError as exc:
+        err.print(f"[red]gh failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+
+
 def main() -> None:
     """Console-script entry point."""
     app()
