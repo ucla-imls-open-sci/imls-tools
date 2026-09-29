@@ -73,6 +73,47 @@ wbcheck report ./my-lesson --html report.html --open
 wbcheck report ./my-lesson --pdf report.pdf
 ```
 
+#### Browsing findings in the TUI
+
+```bash
+wbcheck tui ./my-lesson        # runs `check` first if there are no saved results
+```
+
+A terminal UI over the saved results. On the left, a folder → file → rule
+code tree with counts, colored by the worst severity in each file. On the
+right, the findings table, with a detail pane below it showing the full
+message, the quote (for AI findings), the fix, clickable guide links, and
+the source lines around the finding.
+
+| Key | Does |
+|---|---|
+| `enter` (tree) | filter to that file or rule code |
+| `space` | select / unselect a finding (moves down) |
+| `i` | ignore the selection (or the current finding): adds its ID to `.wbcheck.toml` |
+| `o` | open the file at the finding's line in `$VISUAL` / `$EDITOR` (vim, nvim, emacs, nano, VS Code, Cursor, Sublime, Zed, Helix...) |
+| `c` | file issues: the selection as **one** issue, or, with nothing selected, the visible findings grouped as `wbcheck issues` would. Shows the list and asks `y`/`n` first, and skips anything already filed |
+| `s` / `a` | cycle the minimum severity (all → warnings+ → errors) / the source (all → mechanical → AI) |
+| `/` | search message, quote, file, and code; `esc` clears every filter |
+| `r` | re-run the mechanical checks (after editing), keeping AI findings |
+| `q` | quit |
+
+#### Ignoring findings: `.wbcheck.toml`
+
+Put a `.wbcheck.toml` at the lesson root, and commit it so collaborators
+share it:
+
+```toml
+[ignore]
+codes = ["WB404"]                      # a rule, everywhere
+paths = ["episodes/all_exercises.md"]  # every finding in these files (globs ok)
+ids = ["8289307d05d3"]                 # single findings, by stable ID
+```
+
+`wbcheck check` and `review` drop matching findings before saving, and the
+report header shows how many were ignored. The TUI's `i` key adds IDs here.
+When it does, the file is rewritten in the canonical form above, so comments
+inside it aren't kept.
+
 #### Filing findings as GitHub issues
 
 ```bash
