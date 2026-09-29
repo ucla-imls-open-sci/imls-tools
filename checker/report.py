@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -14,17 +15,16 @@ from pathlib import Path
 import yaml
 
 from checker import __version__
+from checker.rules import Guide, get_rule
 
 SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
 SEVERITY_ICON = {"error": "\033[31m❌\033[0m", "warning": "\033[33m⚠️\033[0m", "info": "ℹ️"}
 SEVERITY_ICON_PLAIN = {"error": "❌", "warning": "⚠️", "info": "ℹ️"}
 
-# One authoritative Workbench/Carpentries doc per check category, appended to
-# a finding's hint (or standing in when there is no instance-specific hint)
-# so "what's wrong" always has a "here's the rule" to go read. `boilerplate`
-# has no external entry deliberately -- it's a check this tool invented, not
-# something sandpaper/pegboard document, so there's no canonical page to
-# point at; its instance-specific hints already carry the explanation.
+# Category-wide fallback guide, used only for findings with no rule code
+# (every mechanical check has one -- see checker/rules.py, which cites the
+# specific guide section per rule). `boilerplate` has no entry deliberately:
+# it's a check this tool invented, so there's no canonical page to point at.
 CATEGORY_GUIDE_LINKS: dict[str, tuple[str, str]] = {
     "config": ("Episodes and lesson structure", "https://carpentries.github.io/sandpaper-docs/episodes.html"),
     "front-matter": ("Episode front matter", "https://carpentries.github.io/sandpaper-docs/episodes.html"),
@@ -42,17 +42,85 @@ CATEGORY_GUIDE_LINKS: dict[str, tuple[str, str]] = {
 }
 
 
+# Spans whose digits are part of a finding's subject (a quoted bullet, a
+# backticked filename like `03-data.md`) and must survive ID normalization.
+_PROTECTED_SPAN_RE = re.compile(r"`[^`]*`|\"[^\"]*\"")
+# "on line 14" / "line 14" references move whenever the file is edited above
+# the finding; they are location, not identity.
+_LINE_REF_RE = re.compile(r"\b(?:on )?lines? \d+\b")
+# Counts ("7 contractions", "12.5 per 1,000 words") drift as prose changes
+# without the underlying problem changing.
+_NUMBER_RE = re.compile(r"\d[\d,.]*")
+
+
+def _normalize_for_id(message: str) -> str:
+    """Message text with line references and counts removed, except inside
+    backtick/double-quote spans, so a finding's ID survives edits elsewhere
+    in the file."""
+    parts = []
+    last = 0
+    for match in _PROTECTED_SPAN_RE.finditer(message):
+        parts.append(_NUMBER_RE.sub("#", _LINE_REF_RE.sub("", message[last:match.start()])))
+        parts.append(match.group(0))
+        last = match.end()
+    parts.append(_NUMBER_RE.sub("#", _LINE_REF_RE.sub("", message[last:])))
+    return " ".join("".join(parts).lower().split())
+
+
 @dataclass
 class Finding:
     """One check result: a severity/category/message, where it applies, and
-    optionally how to fix it."""
+    optionally how to fix it. `code` ties it to a Rule in checker/rules.py;
+    `source` is "mechanical" for these checks and "ai" for model findings,
+    whose `quote` is the verbatim text they point at."""
 
     severity: str  # "error" | "warning" | "info"
-    category: str  # "config" | "front-matter" | "divs" | "headings" | "links"
+    category: str  # "config" | "front-matter" | "divs" | "headings" | "links" | ...
     message: str
     location: str | None = None  # e.g. "episodes/01-intro.md" or "config.yaml"
     hint: str | None = None
     line: int | None = None  # 1-indexed source line, when the check knows one
+    code: str | None = None  # e.g. "WB112", see checker/rules.py
+    quote: str | None = None
+    source: str = "mechanical"
+    # Nth repeat (in file order) of an otherwise-identical finding in the
+    # same file, e.g. the 3rd duplicate `Exercise:` heading; set by
+    # assign_occurrences(), 0 for the first/only one.
+    occurrence: int = 0
+
+    @property
+    def identity_key(self) -> str:
+        """Rule code (or category) + file + normalized message: what makes
+        two findings "the same problem", before occurrence numbering."""
+        return f"{self.code or self.category}|{self.location or ''}|{_normalize_for_id(self.message)}"
+
+    @property
+    def id(self) -> str:
+        """Stable 12-hex-char identity: `identity_key` plus the occurrence
+        number for repeats. Line numbers and counts are excluded, so the
+        same problem keeps its ID when unrelated edits shift it around --
+        what lets a re-run recognize a finding that already has an issue
+        filed."""
+        key = self.identity_key + (f"#{self.occurrence}" if self.occurrence else "")
+        return hashlib.sha1(key.encode()).hexdigest()[:12]
+
+    @property
+    def guides(self) -> tuple[Guide, ...]:
+        """Guide citations for this finding, most specific first: the rule's
+        own citations, falling back to the category-wide link for findings
+        without a registered code."""
+        rule = get_rule(self.code)
+        if rule is not None:
+            return rule.guides
+        entry = CATEGORY_GUIDE_LINKS.get(self.category)
+        return (entry,) if entry else ()
+
+    def to_dict(self) -> dict:
+        """JSON-ready dict: every field plus the derived `id` and `guides`."""
+        data = asdict(self)
+        data["id"] = self.id
+        data["guides"] = [{"label": label, "url": url} for label, url in self.guides]
+        return data
 
     def sort_key(self):
         """Sort errors before warnings before info, then group by location,
@@ -63,6 +131,21 @@ class Finding:
             self.line if self.line is not None else -1,
             self.category,
         )
+
+
+def assign_occurrences(findings: list[Finding]) -> list[Finding]:
+    """Number repeats of the same identity_key in file order (by line), so
+    each occurrence gets a distinct, still line-independent ID. Mutates and
+    returns `findings`."""
+    seen: dict[str, int] = {}
+    ordered = sorted(
+        findings, key=lambda f: (f.location or "", f.line if f.line is not None else -1)
+    )
+    for f in ordered:
+        key = f.identity_key
+        f.occurrence = seen.get(key, 0)
+        seen[key] = f.occurrence + 1
+    return findings
 
 
 @dataclass
@@ -104,16 +187,23 @@ def _blame_suffix(location: str, blame: dict[str, str] | None) -> str:
     return f" (last change authored by: {author})" if author else ""
 
 
-def _guide_suffix(category: str) -> str:
-    """Appendable ' (See: Label)' text for terminal/markdown, empty if the
-    category has no canonical external doc."""
-    entry = CATEGORY_GUIDE_LINKS.get(category)
-    return f" (see: {entry[0]}, {entry[1]})" if entry else ""
+def _guide_suffix(finding: Finding) -> str:
+    """Appendable ' (see: Label, url)' text for the terminal, citing the
+    finding's primary guide; empty if it has none."""
+    guides = finding.guides
+    return f" (see: {guides[0][0]}, {guides[0][1]})" if guides else ""
 
 
-def _guide_link_markdown(category: str) -> str:
-    entry = CATEGORY_GUIDE_LINKS.get(category)
-    return f" [{entry[0]}]({entry[1]})" if entry else ""
+def _guide_link_markdown(finding: Finding) -> str:
+    """Every guide citation for the finding as markdown links, ' · '-joined."""
+    return "".join(
+        f"{' ·' if i else ''} [{label}]({url})" for i, (label, url) in enumerate(finding.guides)
+    )
+
+
+def _code_label(finding: Finding) -> str:
+    """`WB112` when the finding has a rule code, else its category."""
+    return finding.code or finding.category
 
 
 def _terminal_location_prefix(location: str, line: int | None) -> str:
@@ -211,14 +301,14 @@ def render_terminal(
             for f in items:
                 icon = SEVERITY_ICON.get(f.severity, "")
                 prefix = _terminal_location_prefix(location, f.line)
-                lines.append(f"  {icon} {prefix}[{f.category}] {f.message}")
+                lines.append(f"  {icon} {prefix}[{_code_label(f)}] {f.message}")
                 if f.hint:
-                    lines.append(f"     → {f.hint}{_guide_suffix(f.category)}")
-                elif f.category in CATEGORY_GUIDE_LINKS:
-                    lines.append(f"     →{_guide_suffix(f.category)}")
+                    lines.append(f"     → {f.hint}{_guide_suffix(f)}")
+                elif f.guides:
+                    lines.append(f"     →{_guide_suffix(f)}")
 
     if ai_reviews:
-        lines.append(f"\n\033[1mAI review\033[0m")
+        lines.append("\n\033[1mAI review\033[0m")
         for label, text in ai_reviews.items():
             lines.append(f"\n\033[1m{label}\033[0m")
             lines.append(text)
@@ -305,7 +395,7 @@ def _render_file_finding_group(
         icon = SEVERITY_ICON_PLAIN.get(f.severity, "")
         prefix = "- [ ]" if f.severity in ("error", "warning") else "-"
         where = _markdown_location_link(f.location or "General", f.line, github_base, dirty_files)
-        lines.append(f"> {prefix} {icon} {where} — {f.message}")
+        lines.append(f"> {prefix} {icon} {where} — `{_code_label(f)}` {f.message}")
     if guide_link:
         lines.append(">")
         lines.append(f"> **Guide:**{guide_link}")
@@ -411,7 +501,7 @@ def render_markdown(
             lines.append(f"## {location}{_blame_suffix(location, blame)}")
             lines.append("")
             for _category, hint, group_items in _group_by_category_and_hint(items):
-                guide_link = _guide_link_markdown(group_items[0].category)
+                guide_link = _guide_link_markdown(group_items[0])
                 lines.extend(
                     _render_file_finding_group(
                         hint, group_items, github_base, guide_link, dirty_files
@@ -447,10 +537,12 @@ def render_json(
         "generated_by": {"name": "carpentries-workbench-checker", "version": __version__},
         "lesson": asdict(metadata) if metadata is not None else None,
         "summary": summarize(findings),
-        "findings": [asdict(f) for f in findings],
+        "findings": [f.to_dict() for f in findings],
         "ai_reviews": ai_reviews or None,
     }
-    return json.dumps(payload, indent=2)
+    # default=str: config.yaml's unquoted `created: 2026-01-01` parses as a
+    # datetime.date, which json can't serialize on its own.
+    return json.dumps(payload, indent=2, default=str)
 
 
 # The "checker-report" Quarto format extension (see _extensions/checker-report/

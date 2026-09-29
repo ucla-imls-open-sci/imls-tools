@@ -124,7 +124,7 @@ def _build_prompt(
 ) -> str:
     mechanical_summary = (
         "\n".join(
-            f"- [{f.severity}] {f.category}: {f.message}" for f in findings if f.location
+            f"- [{f.severity}] {f.code or f.category}: {f.message}" for f in findings if f.location
         )
         or "(none -- the episode passed all mechanical structure checks)"
     )

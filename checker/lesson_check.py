@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from checker.report import Finding, LessonMetadata
+from checker.report import Finding, LessonMetadata, assign_occurrences
 
 REQUIRED_TOP_DIVS = ("questions", "objectives", "keypoints")
 
@@ -292,6 +292,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                 "config.yaml not found",
                 location="config.yaml",
                 hint="Every Workbench lesson needs a config.yaml at its root.",
+                code="WB001",
             )
         ]
 
@@ -300,7 +301,11 @@ def check_config(lesson_dir: Path) -> list[Finding]:
     except yaml.YAMLError as exc:
         return [
             Finding(
-                "error", "config", f"config.yaml is not valid YAML: {exc}", location="config.yaml"
+                "error",
+                "config",
+                f"config.yaml is not valid YAML: {exc}",
+                location="config.yaml",
+                code="WB002",
             )
         ]
 
@@ -313,6 +318,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                 f"top-level {type(config).__name__} instead",
                 location="config.yaml",
                 hint="Example:\n  title: My Lesson\n  episodes:\n    - introduction.md",
+                code="WB003",
             )
         ]
 
@@ -326,6 +332,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                     f"`{field}` is still the template placeholder or empty",
                     location="config.yaml",
                     hint=f"Set `{field}` to your lesson's real value.",
+                    code="WB004",
                 )
             )
 
@@ -337,6 +344,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                 "`created` date is not set",
                 location="config.yaml",
                 hint="Set `created` to the date the lesson was started (YYYY-MM-DD).",
+                code="WB005",
             )
         )
 
@@ -348,6 +356,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                 "`life_cycle` is still `pre-alpha`",
                 location="config.yaml",
                 hint="Update life_cycle as the lesson matures: pre-alpha -> alpha -> beta -> stable.",
+                code="WB006",
             )
         )
 
@@ -370,6 +379,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                 location="config.yaml",
                 hint="Create the file, or remove it from `episodes:` if it's no longer "
                 "planned.",
+                code="WB007",
             )
         )
 
@@ -395,6 +405,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                         location="config.yaml",
                         hint="If this is meant to be an episode, rename it with a .md "
                         "extension. Right now it's invisible to the build.",
+                        code="WB008",
                     )
                 )
 
@@ -410,6 +421,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                     f"episodes/{name} exists but is not listed in config.yaml `episodes:`",
                     location="config.yaml",
                     hint="Add it to the episodes list so it's included and ordered in the build.",
+                    code="WB009",
                 )
             )
 
@@ -422,6 +434,7 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                 location="config.yaml",
                 hint="[Carpentries Lab] Checks that no key terms are missing from the "
                 "lesson glossary. This only checks the file exists, not its contents.",
+                code="WB010",
             )
         )
 
@@ -494,6 +507,7 @@ def check_support_files(lesson_dir: Path) -> list[Finding]:
                     f"{rel_path} is still the scaffold placeholder, not written yet",
                     location=rel_path,
                     hint=hint,
+                    code="WB113",
                 )
             )
 
@@ -508,6 +522,7 @@ def check_support_files(lesson_dir: Path) -> list[Finding]:
                     f"{glossary_path} is still the scaffold placeholder, not written yet",
                     location=glossary_path,
                     hint=GLOSSARY_HINT,
+                    code="WB114",
                 )
             )
     return findings
@@ -549,6 +564,7 @@ def _check_front_matter(front_matter: dict, location: str) -> list[Finding]:
                     f"missing required front-matter field `{field}`",
                     location=location,
                     hint=hint,
+                    code="WB103",
                 )
             )
     for field in ("teaching", "exercises"):
@@ -562,6 +578,7 @@ def _check_front_matter(front_matter: dict, location: str) -> list[Finding]:
                     location=location,
                     hint=f"Set `{field}:` to a plain integer, e.g. `{field}: 15`, not a "
                     "quoted string or a range.",
+                    code="WB104",
                 )
             )
 
@@ -578,6 +595,7 @@ def _check_front_matter(front_matter: dict, location: str) -> list[Finding]:
                     location=location,
                     hint="[CLDT] Not a hard rule -- but very short or very long episodes are "
                     "worth a second look for scope.",
+                    code="WB105",
                 )
             )
     return findings
@@ -633,6 +651,7 @@ def _check_objective_verbs(body: str, location: str) -> tuple[list[Finding], int
                     hint="[CLDT] Not a hard rule -- judge by whether attainment is directly "
                     "observable, not just the opening word. An action verb (explain, "
                     "choose, predict, ...) usually makes that easier to write.",
+                    code="WB401",
                 )
             )
 
@@ -645,6 +664,7 @@ def _check_objective_verbs(body: str, location: str) -> tuple[list[Finding], int
                 location=location,
                 hint="[CLDT] Aim for 2-4 objectives per episode; consider splitting into "
                 "multiple episodes if you need more.",
+                code="WB402",
             )
         )
 
@@ -680,6 +700,7 @@ def _check_boilerplate(
                 hint="[CLDT] This is `sandpaper::create_lesson()`'s own default episode "
                 "title, not a real one. Replace it before this episode is considered "
                 "written.",
+                code="WB110",
             )
         )
 
@@ -700,6 +721,7 @@ def _check_boilerplate(
                     "content, not real lesson material. Replace it, or delete the episode "
                     "if it isn't ready to write yet, an empty episode is more honest than "
                     "a filled-in-looking one that's still the template.",
+                    code="WB111",
                 )
             )
     return findings
@@ -754,6 +776,7 @@ def _check_placeholder_bullets(body: str, location: str, line_offset: int = 0) -
                     line=reported_line,
                     hint="[CLDT] Replace with real content, this is scaffold placeholder "
                     "text, not a written keypoint/objective/question.",
+                    code="WB112",
                 )
             )
     return findings
@@ -789,6 +812,7 @@ def _check_contractions(body: str, location: str) -> list[Finding]:
                 hint="[Carpentries Lab] Consider spelling them out (don't -> do not) for "
                 "translation and ESL learners. This threshold is a local heuristic, not "
                 "an official Carpentries rule.",
+                code="WB404",
             )
         ]
     return []
@@ -823,6 +847,7 @@ def _check_divs(body: str, location: str, line_offset: int = 0) -> list[Finding]
                         line=lineno + line_offset,
                         hint="See https://carpentries.github.io/sandpaper-docs/episodes.html "
                         "for the full list of recognized div types.",
+                        code="WB201",
                     )
                 )
         else:
@@ -838,6 +863,7 @@ def _check_divs(body: str, location: str, line_offset: int = 0) -> list[Finding]
                         hint="Either this fence has no matching opening `::: type` above it, "
                         "or an earlier div's closing fence was deleted, causing this one to "
                         "close the wrong block. Check the div immediately above.",
+                        code="WB202",
                     )
                 )
             else:
@@ -856,6 +882,7 @@ def _check_divs(body: str, location: str, line_offset: int = 0) -> list[Finding]
                 "everything after it, including blocks that look fine on their own, "
                 "check whether a `keypoints`/`questions`/`objectives` block further down "
                 "actually landed inside this one instead of at the top level.",
+                code="WB203",
             )
         )
 
@@ -871,6 +898,7 @@ def _check_divs(body: str, location: str, line_offset: int = 0) -> list[Finding]
                     "If one exists in the file but isn't showing as top-level, an earlier "
                     "unclosed div is probably nesting it, see any 'never closed' finding "
                     "above first.",
+                    code="WB204",
                 )
             )
 
@@ -901,6 +929,7 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
                     " -- episodes must not use H1, start at H2",
                     location=location,
                     line=reported_line,
+                    code="WB210",
                 )
             )
         elif not first_heading_seen and level != 2:
@@ -912,6 +941,7 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
                     f"{level}, expected level 2",
                     location=location,
                     line=reported_line,
+                    code="WB211",
                 )
             )
 
@@ -929,6 +959,7 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
                     hint="Give each challenge/solution/exercise a unique, descriptive heading "
                     "instead of reusing a generic one.",
                     line=reported_line,
+                    code="WB212",
                 )
             )
         else:
@@ -957,6 +988,7 @@ def _check_links(body: str, lesson_dir: Path, location: str, line_offset: int = 
                         location=location,
                         line=lineno,
                         hint="Add descriptive alt text for accessibility.",
+                        code="WB301",
                     )
                 )
             if not path.startswith(("http://", "https://", "{{")):
@@ -975,6 +1007,7 @@ def _check_links(body: str, lesson_dir: Path, location: str, line_offset: int = 
                             hint="Check the path is relative to episodes/ (images "
                             "typically live in episodes/fig/), and that the file was "
                             "actually committed.",
+                            code="WB302",
                         )
                     )
 
@@ -991,6 +1024,7 @@ def _check_links(body: str, lesson_dir: Path, location: str, line_offset: int = 
                         hint="[CLDT/Carpentries Lab] Screen readers and translation tools "
                         "lose context with generic link text like 'click here' -- "
                         "describe the destination.",
+                        code="WB303",
                     )
                 )
             if path.startswith(("http://", "https://", "#", "mailto:", "{{")):
@@ -1028,6 +1062,7 @@ def _check_links(body: str, lesson_dir: Path, location: str, line_offset: int = 
                         hint="Confirm the target exists relative to episodes/, the "
                         "lesson root, or learners/, instructors/, profiles/. A link to "
                         "another episode's rendered .html targets its .md source.",
+                        code="WB304",
                     )
                 )
     return findings
@@ -1049,6 +1084,7 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
                 "front-matter",
                 "episode does not start with a `---` YAML front-matter block",
                 location=location,
+                code="WB101",
             )
         )
         body = text
@@ -1063,6 +1099,7 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
                 f"top-level {type(parsed[0]).__name__} instead",
                 location=location,
                 hint="Example:\n  title: My Episode\n  teaching: 10\n  exercises: 5",
+                code="WB102",
             )
         )
         body = parsed[1]
@@ -1098,6 +1135,7 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
                 location=location,
                 hint="[Carpentries Lab] Consider adding a challenge, discussion, or "
                 "other formative-assessment checkpoint.",
+                code="WB403",
             )
         )
 
@@ -1121,6 +1159,7 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
                 f"{challenges} challenge(s) but only {solutions} solution(s)",
                 location=location,
                 hint="Not every challenge needs a solution block, but double-check this is intentional.",
+                code="WB205",
             )
         )
 
@@ -1134,14 +1173,10 @@ def _looks_misplaced(episode_findings: list[Finding]) -> bool:
     baked into `sandpaper::create_lesson()`'s own scaffold -- so zero of
     the three present is a much stronger "this was never meant to be an
     episode" signal than "this episode is very unwritten." Checked against
-    the actual `divs`-category findings (each required block that's
-    missing produces its own Finding), not by re-parsing the body, so this
-    can't drift out of sync with what _check_divs() actually detected."""
-    missing_required = sum(
-        1
-        for f in episode_findings
-        if f.category == "divs" and f.message.startswith("missing required `")
-    )
+    the actual WB204 findings (each required block that's missing produces
+    its own Finding), not by re-parsing the body, so this can't drift out of
+    sync with what _check_divs() actually detected."""
+    missing_required = sum(1 for f in episode_findings if f.code == "WB204")
     return missing_required == len(REQUIRED_TOP_DIVS)
 
 
@@ -1154,7 +1189,7 @@ def run_checks(lesson_dir: Path, episode_filter: str | None = None) -> list[Find
     episodes_dir = lesson_dir / "episodes"
     if not episodes_dir.exists():
         findings.append(
-            Finding("error", "config", "no episodes/ directory found", location=str(lesson_dir))
+            Finding("error", "config", "no episodes/ directory found", location=str(lesson_dir), code="WB011")
         )
         return findings
 
@@ -1167,6 +1202,7 @@ def run_checks(lesson_dir: Path, episode_filter: str | None = None) -> list[Find
                     "error",
                     "config",
                     f"no episode named `{episode_filter}` found under episodes/",
+                    code="WB012",
                 )
             )
             return findings
@@ -1189,8 +1225,9 @@ def run_checks(lesson_dir: Path, episode_filter: str | None = None) -> list[Find
                     "move it: a glossary belongs in learners/reference.md; other "
                     "support material belongs under learners/, instructors/, or "
                     "profiles/, not episodes/.",
+                    code="WB013",
                 )
             )
         findings.extend(episode_findings)
 
-    return findings
+    return assign_occurrences(findings)

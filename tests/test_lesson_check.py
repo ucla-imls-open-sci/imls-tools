@@ -815,17 +815,17 @@ def test_unlisted_episode_files_empty_when_episodes_field_blank(tmp_path):
 
 def test_looks_misplaced_true_when_all_three_required_blocks_missing():
     findings = [
-        Finding("error", "divs", "missing required `questions` block"),
-        Finding("error", "divs", "missing required `objectives` block"),
-        Finding("error", "divs", "missing required `keypoints` block"),
+        Finding("error", "divs", "missing required `questions` block", code="WB204"),
+        Finding("error", "divs", "missing required `objectives` block", code="WB204"),
+        Finding("error", "divs", "missing required `keypoints` block", code="WB204"),
     ]
     assert _looks_misplaced(findings) is True
 
 
 def test_looks_misplaced_false_when_one_required_block_present():
     findings = [
-        Finding("error", "divs", "missing required `questions` block"),
-        Finding("error", "divs", "missing required `objectives` block"),
+        Finding("error", "divs", "missing required `questions` block", code="WB204"),
+        Finding("error", "divs", "missing required `objectives` block", code="WB204"),
     ]
     assert _looks_misplaced(findings) is False
 

@@ -237,6 +237,28 @@ throughput long before you run out of RAM outright.
 
 Div and heading checks skip content inside fenced code blocks (```` ``` ````/`~~~`) — a lesson that teaches Markdown, Workbench syntax, or shell `#` comments will contain literal `:::`/`#` text that isn't a real div or heading.
 
+### Rule codes and finding IDs
+
+Every check has a stable rule code, ruff-style, shown in brackets in the
+terminal report (`[WB204]`) and inline in the markdown report. The registry
+in [`checker/rules.py`](checker/rules.py) defines each code's name, why it
+matters, and the most specific guide section that states the rule.
+
+| Range | Covers |
+|---|---|
+| `WB0xx` | `config.yaml`, episode list, lesson-level files |
+| `WB1xx` | episode front matter, scaffold/placeholder content, support files |
+| `WB2xx` | fenced divs and headings |
+| `WB3xx` | links and images |
+| `WB4xx` | objectives and style |
+| `AIxxx` | reserved for AI review findings |
+
+Codes are never renumbered or reused. Each finding in `--format json` output
+also carries an `id`: a hash of its code, file, and message with line numbers
+and counts stripped, plus an occurrence number for repeats in the same file.
+The same problem keeps the same `id` when unrelated edits move it, which is
+what issue filing and suppression key on (#21, #23).
+
 The `objectives`, `style`, and glossary checks aren't things `sandpaper`/`pegboard` check at all — they come from [Collaborative Lesson Development Training](https://carpentries.github.io/lesson-development-training/aio.html) and [The Carpentries Lab's reviewer checklist](https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md), the same two sources the `--ai` review's retrieval now pulls from (alongside the style guide) so its narrative review grades against the same rubric a human Lab reviewer would.
 
 ## Testing
