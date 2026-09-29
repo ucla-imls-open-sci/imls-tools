@@ -45,7 +45,7 @@ def _finding_codes_in_source() -> list[str | None]:
 def test_rule_codes_are_well_formed():
     for code, rule in RULES.items():
         assert code == rule.code
-        assert re.fullmatch(r"WB[0-4]\d\d", code), code
+        assert re.fullmatch(r"WB[0-4]\d\d|AI2\d\d", code), code
 
 
 def test_rule_names_are_unique_kebab_case():
@@ -66,7 +66,8 @@ def test_every_finding_in_lesson_check_has_a_registered_code():
 
 def test_every_registered_rule_is_used_by_exactly_one_check():
     codes = [c for c in _finding_codes_in_source() if c is not None]
-    assert sorted(codes) == sorted(RULES), "a rule is unused, or two checks share a code"
+    mechanical_rules = sorted(c for c in RULES if c.startswith("WB"))
+    assert sorted(codes) == mechanical_rules, "a rule is unused, or two checks share a code"
 
 
 def test_every_rule_cites_an_https_guide():

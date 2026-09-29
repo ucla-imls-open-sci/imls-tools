@@ -198,47 +198,73 @@ To change the report's appearance further, edit the extension, not
 don't need Quarto installed; they just guard against the extension
 directory silently going missing or invalid.
 
-### Adding the AI narrative review
+### Adding the AI review
 
-Off by default (it costs time, and for `claude`/`codex` it costs API usage).
-Add `--ai`:
+Off by default: it costs time, and for `claude` it costs API usage.
 
 ```bash
-pixi run check ./my-lesson --episode 03-sharing.md --ai --backend ollama
-pixi run check ./my-lesson --episode 03-sharing.md --ai --backend claude
-pixi run check ./my-lesson --episode 03-sharing.md --ai --backend codex
+wbcheck review ./my-lesson --backend ollama                  # local, free
+wbcheck review ./my-lesson --backend claude                  # Anthropic API
+wbcheck review ./my-lesson --episode 03-sharing.md --backend claude --effort medium
+pixi run check ./my-lesson --ai --backend claude             # legacy CLI, same review as prose
 ```
 
-All three backends use the same local Ollama embedding model
-(`nomic-embed-text`) to retrieve relevant style-guide passages — that part
-never leaves your machine or costs anything, regardless of which backend
-answers the actual question.
+The review returns **structured findings**, not an essay. Each one has a
+rule code by area, a severity, a verbatim quote from the episode, the
+problem, a suggested fix, and a `scope` label that groups related findings
+into one pull request's worth of work:
 
-Alongside objectives/assessment/audience-fit/scope/tone, the review also
-grades a sixth criterion: **glossary gaps**. It reads the lesson's
-`learners/reference.md` (treating it as empty if it's still the
-`sandpaper::create_lesson()` placeholder, so an unwritten glossary doesn't
-get mistaken for "nothing's missing") and lists terms of art, acronyms, or
-domain-specific jargon the episode uses but doesn't define, each with a
-one-sentence draft definition scoped to how *this* lesson actually uses the
-term. Skips anything the episode already explains inline, and anything
-already covered (even loosely) in the existing glossary.
+| Code | Area |
+|---|---|
+| `AI201` | objectives not observable, or not assessed |
+| `AI202` | exercises without diagnostic power or variety |
+| `AI203` | difficulty or pacing mismatched to the audience |
+| `AI204` | too much at once (cognitive load) |
+| `AI205` | dismissive language, idioms, unexplained jargon |
+| `AI206` | glossary gap, with a draft definition in the fix |
+| `AI207` | accessibility (alt text, color-only cues) |
+| `AI208` | accuracy |
+
+**Every finding is checked against the text.** The model has to quote the
+episode verbatim, and findings whose quote isn't actually in the episode are
+dropped (tolerant of whitespace, smart quotes, markdown emphasis, and `...`
+elisions). The run reports how many were dropped. So every AI finding in a
+report points at a real line you can check, and a hallucinated finding can't
+get through.
+
+AI findings are saved in the results file next to the mechanical ones
+(`"source": "ai"`) and render in every report format with their quote.
+Re-reviewing an episode replaces its earlier AI findings.
+
+**What the model grades against** is pinned into every prompt from
+[`checker/rubric/`](checker/rubric/): the Carpentries Lab reviewer checklist,
+plus excerpts of the Collaborative Lesson Development Training and Workbench
+docs. Nothing is fetched at review time, so the same lesson gets the same
+rubric every run, and no network or Ollama is needed for the guidance itself.
+To pick up upstream changes, run `pixi run refresh-rubric`, read the diff,
+and commit it. The script fails loudly if an upstream section it expects has
+moved.
+
+The lesson glossary (`learners/reference.md`, treated as empty while it's
+still the scaffold placeholder) goes into the prompt too, so glossary-gap
+findings skip terms already defined.
 
 | Backend | What it needs | Notes |
 |---|---|---|
-| `ollama` | `pixi run pull-models` (see below), `ollama serve` running | Fully local, free, slower and less sharp than the API backends |
-| `claude` | `ANTHROPIC_API_KEY` set, or `ant auth login` | Uses the Anthropic Python SDK directly. Default model `claude-opus-5`; override with `--model claude-sonnet-5` or `--model claude-haiku-4-5` if you want cheaper/faster over Opus's quality |
-| `codex` | The [OpenAI Codex CLI](https://developers.openai.com/codex) (`npm install -g @openai/codex`) logged in and working (`codex exec "hello"` should just print a reply) | Shells out to `codex exec`; pass `--model <name>` to override its configured default |
+| `ollama` | `pixi run pull-models` (see below), `ollama serve` running | Fully local and free. Output is constrained to the findings schema, with one automatic retry if a local model still misses it |
+| `claude` | `ANTHROPIC_API_KEY` set, or `ant auth login` | Default `claude-opus-5-5`, `--effort high` (`low`/`medium` are cheaper and faster; `xhigh`/`max` are more thorough). The rubric and glossary are prompt-cached across episodes. If a safety classifier declines an episode, the API retries it on a fallback model instead of failing |
 
-`--model` overrides the default for whichever `--backend` you picked.
+`--model` overrides the default for whichever `--backend` you picked. The
+old `codex` backend was removed. It couldn't enforce the findings schema,
+and it shelled out to a CLI with the whole prompt as an argument.
 
 ## Recommended local models (16GB Apple Silicon)
 
 Pull them with pixi:
 
 ```bash
-pixi run pull-models          # nomic-embed-text + qwen3.5:9b-q4_K_M (default, balanced)
-pixi run pull-models-small     # nomic-embed-text + qwen3.5:4b (faster, lighter)
+pixi run pull-models          # qwen3.5:9b-q4_K_M (default, balanced)
+pixi run pull-models-small     # qwen3.5:4b (faster, lighter)
 pixi run pull-models-coding    # qwen2.5-coder:7b (for code-heavy lessons)
 ```
 
@@ -248,7 +274,6 @@ pixi run pull-models-coding    # qwen2.5-coder:7b (for code-heavy lessons)
 | `qwen3.5:4b` | ~3.4 GB | Quick iterative checks | Noticeably faster, still coherent; use while drafting, switch to the 9B for a final pass |
 | `qwen2.5-coder:7b` | ~4.7 GB | Lessons with heavy code blocks (shell, Python, R episodes) | Coder-tuned variant reviews code samples more carefully than the general model |
 | `gpt-oss:20b` | ~14 GB | A stretch option if you want the best local quality and can close everything else | Runs on 16GB via MXFP4 quantization, but leaves little headroom — expect it to be slow with other apps open |
-| `nomic-embed-text` | ~274 MB | Retrieval (used by every backend, not just `ollama`) | Small, fast, good enough for retrieving style-guide passages |
 
 Don't run the checker's Ollama backend and something else memory-hungry
 (another large model, a heavy IDE) at the same time on 16GB — swap will tank
@@ -284,7 +309,7 @@ matters, and the most specific guide section that states the rule.
 | `WB2xx` | fenced divs and headings |
 | `WB3xx` | links and images |
 | `WB4xx` | objectives and style |
-| `AIxxx` | reserved for AI review findings |
+| `AI2xx` | AI review findings, one code per review area (see [Adding the AI review](#adding-the-ai-review)) |
 
 Codes are never renumbered or reused. Each finding in `--format json` output
 also carries an `id`: a hash of its code, file, and message with line numbers
@@ -292,7 +317,7 @@ and counts stripped, plus an occurrence number for repeats in the same file.
 The same problem keeps the same `id` when unrelated edits move it, which is
 what issue filing and suppression key on (#21, #23).
 
-The `objectives`, `style`, and glossary checks aren't things `sandpaper`/`pegboard` check at all — they come from [Collaborative Lesson Development Training](https://carpentries.github.io/lesson-development-training/aio.html) and [The Carpentries Lab's reviewer checklist](https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md), the same two sources the `--ai` review's retrieval now pulls from (alongside the style guide) so its narrative review grades against the same rubric a human Lab reviewer would.
+The `objectives`, `style`, and glossary checks aren't things `sandpaper`/`pegboard` check at all — they come from [Collaborative Lesson Development Training](https://carpentries.github.io/lesson-development-training/aio.html) and [The Carpentries Lab's reviewer checklist](https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md), the same two sources pinned into the AI review's prompt (see `checker/rubric/`), so it grades against the same rubric a human Lab reviewer would.
 
 ## Testing
 

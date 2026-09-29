@@ -23,11 +23,16 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from checker import __version__
-from checker.ai_review import BACKENDS, EMBED_MODEL
 from checker.cli import _blame_map, _dirty_files, _github_blob_base, _read_glossary, _resolve_target
-from checker.console import render_ai_reviews, render_results
+from checker.console import render_ai_reviews, render_findings, render_results
 from checker.lesson_check import read_lesson_metadata, run_checks
-from checker.report import render_html_via_quarto, render_markdown, render_pdf_via_quarto
+from checker.report import (
+    Finding,
+    assign_occurrences,
+    render_html_via_quarto,
+    render_markdown,
+    render_pdf_via_quarto,
+)
 from checker.results import Results, default_results_path, load, save
 
 app = typer.Typer(
@@ -113,24 +118,35 @@ def check(
     raise typer.Exit(1 if results.error_count else 0)
 
 
+AI_BACKENDS = ("ollama", "claude")  # mirrors checker.ai_review.BACKENDS, kept here so importing
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")  # the CLI never loads the AI stack
+
+
 @app.command()
 def review(
     target: Annotated[str, typer.Argument(help="Lesson directory, or a git URL to clone and review.")] = ".",
     episode: Annotated[str | None, typer.Option(help="Only review this episode file (by filename).")] = None,
-    backend: Annotated[str, typer.Option(help=f"One of: {', '.join(BACKENDS)}.")] = "ollama",
+    backend: Annotated[str, typer.Option(help=f"One of: {', '.join(AI_BACKENDS)}.")] = "ollama",
     model: Annotated[str | None, typer.Option(help="Override the backend's default model.")] = None,
-    embed_model: Annotated[str, typer.Option(help="Ollama embedding model for retrieval.")] = EMBED_MODEL,
+    effort: Annotated[
+        str, typer.Option(help=f"Claude effort: {', '.join(EFFORT_LEVELS)}. Ignored by ollama.")
+    ] = "high",
     results_path: Annotated[
         Path | None, typer.Option("--results", help="Results file to add to (default: <lesson>/.wbcheck/results.json).")
     ] = None,
 ) -> None:
-    """Add an AI review of each episode's writing and pedagogy to the results.
+    """Add AI review findings (source "ai", codes AI2xx) to the results.
 
-    Uses the saved mechanical findings when a results file exists, otherwise runs
-    `check` first. Costs time and, for claude/codex, API usage.
+    Each finding quotes the episode verbatim; findings whose quote isn't in the
+    episode are dropped. Re-reviewing an episode replaces its earlier AI
+    findings. Uses saved results when present, otherwise runs `check` first.
+    Costs time and, for claude, API usage.
     """
-    if backend not in BACKENDS:
-        err.print(f"[red]unknown backend[/] `{backend}`, expected one of {', '.join(BACKENDS)}")
+    if backend not in AI_BACKENDS:
+        err.print(f"[red]unknown backend[/] `{backend}`, expected one of {', '.join(AI_BACKENDS)}")
+        raise typer.Exit(2)
+    if effort not in EFFORT_LEVELS:
+        err.print(f"[red]unknown effort[/] `{effort}`, expected one of {', '.join(EFFORT_LEVELS)}")
         raise typer.Exit(2)
     from checker.ai_review import review_episode
 
@@ -150,6 +166,8 @@ def review(
             episode_files = [p for p in episode_files if p.name == episode]
         glossary_text = _read_glossary(lesson_dir)
 
+        new_findings: list[Finding] = []
+        reviewed: set[str] = set()
         with Progress(
             SpinnerColumn(),
             TextColumn("{task.description}"),
@@ -162,23 +180,46 @@ def review(
                 progress.update(task, description=f"AI review ({backend}): {p.name}")
                 location = str(p.relative_to(lesson_dir))
                 label = f"{p.name} ({backend})"
+                mechanical = [f for f in results.findings if f.location == location and f.source != "ai"]
                 try:
-                    results.ai_reviews[label] = review_episode(
-                        p.read_text(),
-                        [f for f in results.findings if f.location == location],
+                    result = review_episode(
+                        p.read_text(errors="replace"),
+                        location,
+                        mechanical,
                         backend,
-                        model,
-                        embed_model,
-                        glossary_text,
+                        model=model,
+                        glossary_text=glossary_text,
+                        effort=effort,
                     )
                 except Exception as exc:  # noqa: BLE001 -- backend errors are unpredictable
                     err.print(f"[red]AI review failed for {p.name}:[/] {exc}")
                     results.ai_reviews[label] = f"(AI review failed: {exc})"
+                else:
+                    results.ai_reviews[label] = result.as_text()
+                    new_findings.extend(result.findings)
+                    reviewed.add(location)
+                    if result.dropped:
+                        err.print(f"[yellow]{p.name}:[/] dropped {result.dropped} finding(s) with unverifiable quotes")
                 progress.advance(task)
 
+        # A successful re-review supersedes that episode's earlier AI findings;
+        # a failed one leaves them in place.
+        results.findings = [
+            f for f in results.findings if not (f.source == "ai" and f.location in reviewed)
+        ] + new_findings
+        assign_occurrences(results.findings)
         save(results, path)
-        render_ai_reviews(Console(), {k: v for k, v in results.ai_reviews.items() if k.endswith(f"({backend})")})
-        err.print(f"[dim]saved {path}[/]")
+
+        console = Console()
+        ai_only = Results(
+            target=results.target,
+            lesson_dir=results.lesson_dir,
+            findings=[f for f in results.findings if f.source == "ai" and f.location in reviewed],
+        )
+        if ai_only.findings:
+            render_findings(console, ai_only, show_source=False)
+        render_ai_reviews(console, {k: v for k, v in results.ai_reviews.items() if k.endswith(f"({backend})")})
+        err.print(f"[dim]{len(new_findings)} AI finding(s) · saved {path}[/]")
     finally:
         if tmp is not None:
             tmp.cleanup()

@@ -15,7 +15,6 @@ import tempfile
 import webbrowser
 from pathlib import Path
 
-from checker.ai_review import BACKENDS
 from checker.lesson_check import (
     GLOSSARY_PLACEHOLDER_FINGERPRINT,
     read_lesson_metadata,
@@ -233,16 +232,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--ai",
         action="store_true",
-        help="also run an AI narrative review of style/pedagogy (costs time and, for "
-        "claude/codex, API usage)",
+        help="also run an AI review of style/pedagogy (costs time and, for claude, API "
+        "usage); `wbcheck review` saves the same review as structured findings",
     )
-    parser.add_argument("--backend", choices=tuple(BACKENDS), default="ollama")
+    parser.add_argument("--backend", choices=("ollama", "claude"), default="ollama")
     parser.add_argument("--model", help="override the default model for --backend")
-    parser.add_argument(
-        "--embed-model",
-        default="nomic-embed-text",
-        help="Ollama embedding model used for local retrieval, regardless of --backend",
-    )
     args = parser.parse_args(argv)
 
     # Infer the format from --output's extension when --format wasn't given
@@ -285,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
         # results that were already computed.
         ai_reviews: dict[str, str] = {}
         if args.ai:
-            from checker.ai_review import review_episode
+            from checker.ai_review import format_review_text, review_episode
 
             episodes_dir = lesson_dir / "episodes"
             episode_files = sorted(
@@ -300,14 +294,15 @@ def main(argv: list[str] | None = None) -> int:
                 label = f"{path.name} ({args.backend})"
                 print(f"running AI review: {label}...", file=sys.stderr)
                 try:
-                    ai_reviews[label] = review_episode(
-                        path.read_text(),
+                    result = review_episode(
+                        path.read_text(errors="replace"),
+                        relative_location,
                         episode_findings,
                         args.backend,
-                        args.model,
-                        args.embed_model,
-                        glossary_text,
+                        model=args.model,
+                        glossary_text=glossary_text,
                     )
+                    ai_reviews[label] = format_review_text(result)
                 except Exception as exc:  # noqa: BLE001 -- backend errors are unpredictable
                     print(f"AI review failed for {path.name}: {exc}", file=sys.stderr)
                     ai_reviews[label] = f"(AI review failed: {exc})"
