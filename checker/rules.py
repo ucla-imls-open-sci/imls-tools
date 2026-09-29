@@ -143,6 +143,8 @@ _RULES: tuple[Rule, ...] = (
     Rule("WB212", "heading-duplicate", "duplicate heading text",
          "Duplicate headings produce ambiguous anchors and table-of-contents entries.",
          (G_LAB_ED_ACCESS,)),
+    Rule("WB213", "heading-level-jump", "heading skips a level",
+         "Skipped levels (h2 -> h4) break the outline screen readers navigate by.", (G_LAB_ED_ACCESS,)),
     # -- WB3xx: links and images --------------------------------------------
     Rule("WB301", "image-no-alt", "image has no alt text",
          "Alt text is how screen-reader users get the figure.", (G_LAB_REV_ACCESS, G_FIGURES)),

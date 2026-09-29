@@ -972,6 +972,7 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
     # episode's first heading should be H2". H1 and duplicate checks still
     # apply to them.
     div_depth = 0
+    prev_level: int | None = None  # last heading level, divs included
 
     for lineno, line in enumerate(body.splitlines(), start=1):
         if in_code[lineno - 1]:
@@ -1010,6 +1011,26 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
                     code="WB211",
                 )
             )
+
+        # Lab editor checklist: no skipped levels (h2 -> h4). Div titles are
+        # part of the rendered page's heading outline (a callout's ### is an
+        # <h3> screen readers step through), so they count here, unlike the
+        # first-heading check above.
+        if prev_level is not None and level > prev_level + 1:
+            findings.append(
+                Finding(
+                    "warning",
+                    "headings",
+                    f"heading `{'#' * level} {text}` on line {reported_line} jumps from level "
+                    f"{prev_level} to level {level}",
+                    location=location,
+                    line=reported_line,
+                    hint=f"Use level {prev_level + 1} here, or add the missing level-{prev_level + 1} "
+                    "heading above it. Skipped levels break screen-reader navigation.",
+                    code="WB213",
+                )
+            )
+        prev_level = level
 
         if level >= 2 and div_depth == 0:
             first_heading_seen = True

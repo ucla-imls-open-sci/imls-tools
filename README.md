@@ -55,12 +55,15 @@ pixi install
 `<lesson>/.wbcheck/results.json`. That directory ignores itself with its own
 `.gitignore`, so the lesson repo doesn't need a change. Run it as
 `pixi run wbcheck ...`, or as plain `wbcheck ...` inside `pixi shell`.
+`wbcheck --install-completion` adds tab completion for subcommands and flags
+to your shell.
 
 ```bash
 # Fast mechanical checks: prints the report, saves results. Exit 1 on errors.
 wbcheck check ./my-lesson
 wbcheck check ./my-lesson --source      # show the offending source line under each finding
 wbcheck check ./my-lesson --blame       # record who last changed each file
+wbcheck check ./my-lesson --fail-on warning   # exit 1 on warnings too (CI, pre-commit); also info or never
 wbcheck check https://github.com/librarycarpentry/lc-git.git   # temp clone; results saved under ./.wbcheck/
 
 # Slow AI review, added to the same results file (runs `check` first if needed)
@@ -120,15 +123,18 @@ inside it aren't kept.
 wbcheck issues ./my-lesson                     # dry run: table of the issues it would file
 wbcheck issues ./my-lesson --preview           # ...and print each issue body
 wbcheck issues ./my-lesson --create            # file them via `gh` (asks to confirm; -y skips)
-wbcheck issues ./my-lesson --group-by rule     # one issue per rule code across files instead
+wbcheck issues ./my-lesson --group-by file     # one issue per file, even for lesson-wide rules
 wbcheck issues ./my-lesson --source ai --min-severity info --repo me/my-fork
 ```
 
 Each issue is sized for one pull request:
-- By default, mechanical findings are grouped one issue per file. AI findings
-  are grouped per file and `scope`, the model's own label for "fix these
-  together". An episode's one-off AI suggestions are folded into a single
-  "other suggestions" issue.
+- By default (`--group-by auto`), a rule that shows up in 3 or more files
+  gets one lesson-wide issue, e.g. every vague objective in one "rewrite
+  objectives" issue. Other mechanical findings get one issue per file.
+  `--group-by file` or `rule` forces one or the other.
+- AI findings are grouped per file and `scope`, the model's own label for
+  "fix these together". An episode's one-off AI suggestions are folded into
+  a single "other suggestions" issue.
 - Each item has a checkbox, a link to the exact line at the checked commit,
   the quote (for AI findings), and the fix. A "Why these matter" section
   cites the guide for each rule code.
