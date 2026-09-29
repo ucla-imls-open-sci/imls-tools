@@ -49,6 +49,39 @@ pixi install
 
 ## Running the checker
 
+### `wbcheck` (new subcommand CLI)
+
+`wbcheck` splits a run into steps that share one results file,
+`<lesson>/.wbcheck/results.json`. That directory ignores itself with its own
+`.gitignore`, so the lesson repo doesn't need a change. Run it as
+`pixi run wbcheck ...`, or as plain `wbcheck ...` inside `pixi shell`.
+
+```bash
+# Fast mechanical checks: prints the report, saves results. Exit 1 on errors.
+wbcheck check ./my-lesson
+wbcheck check ./my-lesson --source      # show the offending source line under each finding
+wbcheck check ./my-lesson --blame       # record who last changed each file
+wbcheck check https://github.com/librarycarpentry/lc-git.git   # temp clone; results saved under ./.wbcheck/
+
+# Slow AI review, added to the same results file (runs `check` first if needed)
+wbcheck review ./my-lesson --backend claude
+
+# Re-render saved results without re-checking
+wbcheck report ./my-lesson                         # terminal
+wbcheck report ./my-lesson --md report.md --json results.json
+wbcheck report ./my-lesson --html report.html --open
+wbcheck report ./my-lesson --pdf report.pdf
+```
+
+Rule codes in the terminal report link to their guide section in terminals
+that support hyperlinks (iTerm2, Ghostty, WezTerm, VS Code, recent GNOME
+Terminal).
+
+### Legacy flag-based CLI
+
+Still works unchanged during the transition, and is what the `checklesson`
+shell function and `/lesson-checker` skill call today.
+
 ```bash
 # Mechanical checks only, terminal output
 pixi run check ./my-lesson
