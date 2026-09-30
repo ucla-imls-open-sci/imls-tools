@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- README reorganized around tasks (check, fix, review, TUI, issues,
+  reports), with internals moved to a Reference section. It now spells out
+  the vim/nvim loop for `wbcheck fix` (fix, `:w`, `]q`, refresh with
+  `:cexpr system('wbcheck fix . --print')`) and is more careful about what
+  quote verification proves for AI findings (#46).
+- The TUI's issue confirmation lists each issue's findings and says how
+  many selected findings a filter is hiding and how many stale ones were
+  left out (#47).
+
+### Fixed
+From a second external review (`design/2026-09-30-codex-review-wbcheck.md`):
+- The TUI could file a stale AI finding if you selected it by hand, and
+  could offer findings you ignored while it was checking GitHub. One filing
+  rule now covers every path, and the TUI plans issues from the current
+  results (#47).
+- `check --episode` showed and failed on other episodes' saved findings.
+  It now reports on the episode you asked for; the saved results still keep
+  the rest. Partial results are labelled in terminal and file reports and
+  the TUI, instead of reading as "No issues found" (#48).
+- Ignoring one of two AI findings with the same rule, file, and quote could
+  give its ID to the other, which then disappeared on the next check.
+  Saved AI findings now keep their IDs (#49).
+- A damaged `results.json` (e.g. `[]`) crashed `check` instead of being
+  rebuilt; `report` and `issues` showed a traceback. `check` now warns and
+  rebuilds, read-only commands say how to recover, and results are written
+  atomically (#50).
+- A missing or failing `$EDITOR` crashed the TUI; it now shows a
+  notification and keeps running (#50).
+
 ## 0.2.0 (2026-09-29)
 
 A rebuild around a saved results file, structured AI findings, and GitHub
