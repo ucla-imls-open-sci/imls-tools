@@ -16,7 +16,7 @@ issue filing. Tracked in #21 to #28; the design is in
   that survive line shifts (#23).
 - **`wbcheck issues`**: files findings as pull-request-sized GitHub issues,
   grouped per file, per rule when a rule spans 3+ files, or per AI scope.
-  Never files duplicates, even of closed issues (#21).
+  Skips findings already filed, including in closed issues (#21).
 - **`wbcheck tui`**: Textual app to browse, filter, ignore, open in
   `$EDITOR`, and file findings as issues (#28).
 - **`.wbcheck.toml`** to ignore findings by code, path glob, or ID.
@@ -49,6 +49,22 @@ issue filing. Tracked in #21 to #28; the design is in
   backend; the `codex` backend.
 
 ### Fixed
+From an external review (`design/2026-09-29-codex-review-wbcheck.md`):
+- `fix --apply` could delete an objective's text (WB401, when it contained
+  a quote) and corrupt `config.yaml` (WB009, no final newline or a
+  YAML-special file name); `--code WB009` bypassed the reference-content
+  safeguard.
+- `--changed` missed file names with spaces or non-ASCII characters.
+- A `config.yaml` or `CITATION.cff` that isn't a mapping crashed the run.
+- Code fences didn't track fence character and length; `::: {#id .class}`
+  divs read as closing fences; image syntax in inline code was flagged.
+- A review where every episode failed, or `--episode` matched nothing,
+  exited 0.
+- Quote matching crashed on characters that case-fold to several (`ß`).
+- The glossary moved out of the system prompt; Ollama calls got a timeout;
+  `issues` reads up to 10,000 existing issues and refuses past that rather
+  than risk duplicates; CI builds the wheel and checks its contents.
+
 - Installed packages were missing `checker/report.py` (an unanchored
   `report.*` in `.gitignore` excluded it from the build) and the Quarto
   report extension (now shipped inside the package).

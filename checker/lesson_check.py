@@ -21,6 +21,7 @@ REQUIRED_TOP_DIVS = ("questions", "objectives", "keypoints")
 
 # Non-exhaustive, but covers everything in the Workbench style guide as of 2026.
 KNOWN_DIV_TYPES = {
+    "div",  # a Pandoc attribute-only div, e.g. `::: {#id}`
     "questions",
     "objectives",
     "keypoints",
@@ -213,7 +214,29 @@ GENERIC_LINK_TEXT = {
 }
 
 FRONT_MATTER_RE = re.compile(r"^---\n(.*?\n)---\n(.*)$", re.DOTALL)
-DIV_FENCE_RE = re.compile(r"^(:{3,})\s*\{?\.?([a-zA-Z-]*)")
+_DIV_LINE_RE = re.compile(r"^:{3,}(.*)$")
+_DIV_CLASS_RE = re.compile(r"\.([A-Za-z][\w-]*)")
+_DIV_WORD_RE = re.compile(r"[A-Za-z][\w-]*")
+
+
+def _div_fence(line: str) -> str | None:
+    """Pandoc fenced-div syntax for one line: None if it isn't a div fence,
+    "" for a closing fence (colons only), otherwise the opening fence's div
+    type, lowercased: the bare word (`::: challenge`), or the first class in
+    an attribute block (`::: {#q .questions}` -> "questions"), or "div" for
+    an attribute block with no class. Trailing colons (`::: callout :::`)
+    are allowed on an opening fence."""
+    match = _DIV_LINE_RE.match(line.strip())
+    if not match:
+        return None
+    rest = match.group(1).strip().rstrip(":").strip()
+    if not rest:
+        return ""
+    if rest.startswith("{"):
+        cls = _DIV_CLASS_RE.search(rest)
+        return cls.group(1).lower() if cls else "div"
+    word = _DIV_WORD_RE.match(rest)
+    return word.group(0).lower() if word else "div"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)]+)\)")
@@ -235,23 +258,47 @@ def _code_fence_mask(body: str) -> list[bool]:
 
     A lesson teaching Markdown, Workbench syntax, or shell `#` comments will
     contain literal `:::` or `#` text inside ```/~~~ blocks -- those aren't
-    real divs or headings and must not be checked as such.
+    real divs or headings and must not be checked as such. Per CommonMark,
+    a block closes only on a fence of the same character, at least as long
+    as the opener, with nothing after it, so a ```` block can contain ```
+    lines, and a ~~~ line doesn't close a ``` block.
     """
     mask = []
-    in_fence = False
+    opener: str | None = None  # the opening fence run, e.g. "````"
     for line in body.splitlines():
         stripped = line.strip()
-        if not in_fence:
-            if CODE_FENCE_RE.match(stripped):
-                in_fence = True
-                mask.append(True)
-            else:
-                mask.append(False)
+        fence = CODE_FENCE_RE.match(stripped)
+        if opener is None:
+            mask.append(bool(fence))
+            if fence:
+                opener = fence.group(1)
         else:
             mask.append(True)
-            if CODE_FENCE_RE.match(stripped):
-                in_fence = False
+            if (
+                fence
+                and fence.group(1)[0] == opener[0]
+                and len(fence.group(1)) >= len(opener)
+                and stripped == fence.group(1)
+            ):
+                opener = None
     return mask
+
+
+def load_yaml_mapping(path: Path) -> dict | None:
+    """A YAML file's top-level mapping; None if the file is missing, not
+    valid YAML, or not a key: value mapping (a list or a scalar). Every
+    reader of config.yaml and CITATION.cff goes through this, so a
+    malformed file produces its own finding (check_config) instead of
+    crashing the code that reads it later."""
+    if not path.exists():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError:
+        return None
+    if data is None:
+        return {}
+    return data if isinstance(data, dict) else None
 
 
 def _unlisted_episode_files(lesson_dir: Path) -> list[str]:
@@ -262,15 +309,11 @@ def _unlisted_episode_files(lesson_dir: Path) -> list[str]:
     Shared by check_config() (the "not listed" warning) and run_checks()
     (the "this doesn't look like an episode at all" check below, which
     only fires for files that are both unlisted and structurally empty)."""
-    config_path = lesson_dir / "config.yaml"
-    if not config_path.exists():
-        return []
-    try:
-        config = yaml.safe_load(config_path.read_text()) or {}
-    except yaml.YAMLError:
+    config = load_yaml_mapping(lesson_dir / "config.yaml")
+    if config is None:
         return []
     episodes_field = config.get("episodes")
-    if not episodes_field:
+    if not isinstance(episodes_field, list) or not episodes_field:
         return []
     episodes_dir = lesson_dir / "episodes"
     if not episodes_dir.exists():
@@ -361,7 +404,10 @@ def check_config(lesson_dir: Path) -> list[Finding]:
         )
 
     episodes_field = config.get("episodes")
-    listed_episodes = episodes_field or []
+    # sandpaper expects a list; anything else is treated as "not curated"
+    if not isinstance(episodes_field, list):
+        episodes_field = None
+    listed_episodes = [e for e in episodes_field or [] if isinstance(e, str)]
     episodes_dir = lesson_dir / "episodes"
     on_disk = (
         sorted(p.name for p in episodes_dir.glob("*") if p.suffix in (".md", ".Rmd"))
@@ -450,13 +496,10 @@ def read_lesson_metadata(lesson_dir: Path) -> LessonMetadata:
     raise or return Findings the way check_config() does."""
     metadata = LessonMetadata()
 
-    config_path = lesson_dir / "config.yaml"
-    if config_path.exists():
-        try:
-            config = yaml.safe_load(config_path.read_text()) or {}
-        except yaml.YAMLError:
-            config = {}
-        carpentry_code = config.get("carpentry") or None
+    config = load_yaml_mapping(lesson_dir / "config.yaml")
+    if config is not None:
+        carpentry_code = config.get("carpentry")
+        carpentry_code = carpentry_code if isinstance(carpentry_code, str) and carpentry_code else None
         metadata.title = config.get("title") or None
         metadata.carpentry = (
             CARPENTRY_NAMES.get(carpentry_code, carpentry_code) if carpentry_code else None
@@ -467,13 +510,10 @@ def read_lesson_metadata(lesson_dir: Path) -> LessonMetadata:
         metadata.contact = config.get("contact") or None
         metadata.created = config.get("created") or None
 
-    citation_path = lesson_dir / "CITATION.cff"
-    if citation_path.exists():
-        try:
-            citation = yaml.safe_load(citation_path.read_text()) or {}
-        except yaml.YAMLError:
-            citation = {}
-        for entry in citation.get("authors") or []:
+    citation = load_yaml_mapping(lesson_dir / "CITATION.cff")
+    if citation is not None:
+        authors = citation.get("authors")
+        for entry in authors if isinstance(authors, list) else []:
             if not isinstance(entry, dict):
                 continue
             # CFF allows an "entity" author (an organization) via `name`,
@@ -636,11 +676,20 @@ _OBJECTIVE_REWRITES = (
 )
 
 
-def _suggest_objective(text: str) -> str | None:
+def rewrite_objective_opener(text: str) -> str | None:
+    """`text` with only its vague opener replaced (Understand -> Explain,
+    ...), everything after it untouched; None if no opener matches. Used
+    for both the hint's suggestion and the WB401 autofix, so the fix never
+    depends on parsing the hint's prose."""
     for pattern, verb in _OBJECTIVE_REWRITES:
         if pattern.match(text):
-            return pattern.sub(verb, text, count=1).rstrip(".;: ")
+            return pattern.sub(verb, text, count=1)
     return None
+
+
+def _suggest_objective(text: str) -> str | None:
+    rewritten = rewrite_objective_opener(text)
+    return rewritten.rstrip(".;: ") if rewritten else None
 
 
 def _check_objective_verbs(body: str, location: str, line_offset: int = 0) -> tuple[list[Finding], int]:
@@ -661,9 +710,8 @@ def _check_objective_verbs(body: str, location: str, line_offset: int = 0) -> tu
     for i, line in enumerate(lines):
         if in_code[i]:
             continue
-        match = DIV_FENCE_RE.match(line.strip())
-        if match:
-            div_type = match.group(2).lower()
+        div_type = _div_fence(line)
+        if div_type is not None:
             if div_type:
                 if div_type == "objectives" and depth == 0:
                     in_objectives = True
@@ -795,9 +843,8 @@ def _check_placeholder_bullets(body: str, location: str, line_offset: int = 0) -
     for i, line in enumerate(lines):
         if in_code[i]:
             continue
-        match = DIV_FENCE_RE.match(line.strip())
-        if match:
-            div_type = match.group(2).lower()
+        div_type = _div_fence(line)
+        if div_type is not None:
             if div_type:
                 if div_type in REQUIRED_TOP_DIVS and depth == 0:
                     tracked_type = div_type
@@ -884,10 +931,9 @@ def _check_divs(body: str, location: str, line_offset: int = 0) -> list[Finding]
     for lineno, line in enumerate(body.splitlines(), start=1):
         if in_code[lineno - 1]:
             continue
-        match = DIV_FENCE_RE.match(line.strip())
-        if not match:
+        div_type = _div_fence(line)
+        if div_type is None:
             continue
-        div_type = match.group(2).lower()
 
         if div_type:
             stack.append((div_type, lineno))
@@ -977,9 +1023,9 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
     for lineno, line in enumerate(body.splitlines(), start=1):
         if in_code[lineno - 1]:
             continue
-        fence = DIV_FENCE_RE.match(line.strip())
-        if fence:
-            div_depth = div_depth + 1 if fence.group(2) else max(0, div_depth - 1)
+        fence = _div_fence(line)
+        if fence is not None:
+            div_depth = div_depth + 1 if fence else max(0, div_depth - 1)
             continue
         match = HEADING_RE.match(line)
         if not match:
@@ -1064,6 +1110,7 @@ def _check_links(body: str, lesson_dir: Path, location: str, line_offset: int = 
         if in_code[i]:
             continue
         lineno = i + 1 + line_offset
+        line = INLINE_CODE_RE.sub(" ", line)  # `![x](y.png)` in code is literal text
         for alt, raw_path in IMAGE_RE.findall(line):
             path = _strip_link_title(raw_path)
             if not alt.strip():
@@ -1230,12 +1277,12 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
     challenges = sum(
         1
         for i, ln in enumerate(lines)
-        if not in_code[i] and re.match(r"^:{3,}\s*\{?\.?challenge", ln)
+        if not in_code[i] and _div_fence(ln) == "challenge"
     )
     solutions = sum(
         1
         for i, ln in enumerate(lines)
-        if not in_code[i] and re.match(r"^:{3,}\s*\{?\.?solution", ln)
+        if not in_code[i] and _div_fence(ln) == "solution"
     )
     if challenges > solutions:
         findings.append(

@@ -232,9 +232,14 @@ as a diff, and asks `y`/`n`/`a`(ll)/`q` (`--yes` applies them all):
 | `WB213` | set a heading that skips a level to one below the previous heading |
 | `WB401` | replace a vague objective opener with the suggested verb (Understand → Explain, Know → Identify, ...). Worth reading each one: it's a starting point, and the objective still needs an exercise that assesses it |
 
-Each fix checks that the line hasn't changed since the check ran, and
-content (prose, placeholders, exercises) is always left to you. Review the
-result with `git diff` like any other edit.
+Each fix edits only the part it's about (a WB401 fix swaps the opening verb
+and keeps the rest of the objective verbatim), checks that the line hasn't
+changed since the check ran, and, for `config.yaml`, quotes the file name as
+YAML needs and re-parses the result before writing. The "looks like
+reference content" safeguard for WB009 is re-checked from the file itself, so
+`--code WB009` or an ignored WB013 can't bypass it. Content (prose,
+placeholders, exercises) is always left to you. Review the result with
+`git diff` like any other edit.
 
 ## What it checks
 
@@ -291,7 +296,11 @@ or reused.
 A few details worth knowing:
 
 - Div and heading checks skip fenced code blocks, so a lesson that teaches
-  Markdown or shell `#` comments doesn't trip them.
+  Markdown or shell `#` comments doesn't trip them. Fences follow CommonMark
+  (a ```` block can contain ```), and divs follow Pandoc, including
+  attribute syntax like `::: {#q .questions}`. Link and image syntax inside
+  inline code is treated as text. Reference-style links (`[text][ref]`)
+  aren't checked yet.
 - Image paths resolve relative to `episodes/` (the Workbench `episodes/fig/`
   convention) or the lesson root, and `.html` links resolve to the `.md` or
   `.Rmd` source they're rendered from.
@@ -359,9 +368,12 @@ line you can check.
 [`checker/rubric/`](checker/rubric/): the Carpentries Lab reviewer checklist,
 plus excerpts of CLDT and the Workbench docs. Nothing is fetched at review
 time, so the same lesson gets the same rubric every run. The lesson's
-glossary (`learners/reference.md`) goes into the prompt too, so glossary-gap
-findings skip terms already defined. The mechanical findings are included as
-well, so the model doesn't repeat them.
+glossary (`learners/reference.md`) and the episode go into the user message,
+never the system prompt, so lesson text can't carry operator authority;
+glossary-gap findings skip terms already defined. The mechanical findings are
+included as well, so the model doesn't repeat them. A review that fails for
+any episode (backend down, refusal, timeout) exits 1 after saving the ones
+that succeeded. Local Ollama calls time out after 15 minutes.
 
 | Backend | Needs | Notes |
 |---|---|---|
@@ -444,10 +456,13 @@ Each issue is sized for one pull request:
 - Notes (`info`) are left out unless you pass `--min-severity info` (or, in
   the TUI, select them yourself).
 
-**Re-running never duplicates.** Each finding's ID is hidden in the issue
-body. Before filing, `issues` reads every `wbcheck`-labelled issue in the
+**Re-running doesn't re-file.** Each finding's ID is hidden in the issue
+body. Before filing, `issues` reads the `wbcheck`-labelled issues in the
 repo, open or closed, and leaves out anything already filed, so a finding
-you close as won't-fix stays closed. The repo defaults to the lesson's
+you close as won't-fix stays closed. That depends on the hidden ID and the
+`wbcheck` label staying on the issue, and on the finding's ID staying the
+same (a reworded AI finding gets a new one). If a repo ever has more than
+10,000 `wbcheck` issues, it refuses rather than risk duplicates. The repo defaults to the lesson's
 GitHub `origin`, and it warns first when files had uncommitted changes at
 check time, since their items can't link to GitHub.
 

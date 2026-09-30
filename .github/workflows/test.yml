@@ -16,6 +16,7 @@ jobs:
           cache: true
       - run: pixi run test
       - run: pixi run lint
+      - run: pixi run check-wheel
 
   # Installs the way users do (install.sh: pixi + clone + launcher) and runs
   # the installed wbcheck from outside the repo, so packaging mistakes (a

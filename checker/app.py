@@ -228,6 +228,9 @@ def review(
         episode_files = sorted(p for p in (lesson_dir / "episodes").glob("*") if p.suffix in (".md", ".Rmd"))
         if episode:
             episode_files = [p for p in episode_files if p.name == episode]
+            if not episode_files:
+                err.print(f"[red]no episode named[/] `{episode}` under episodes/")
+                raise typer.Exit(2)
         glossary_text = _read_glossary(lesson_dir)
 
         new_findings: list[Finding] = []
@@ -288,6 +291,11 @@ def review(
             render_findings(console, ai_only, show_source=False)
         render_ai_reviews(console, {k: v for k, v in results.ai_reviews.items() if k.endswith(f"({backend})")})
         err.print(f"[dim]{len(new_findings)} AI finding(s) · saved {path}[/]")
+        failed = len(episode_files) - len(reviewed)
+        if failed:
+            # successes are saved above; still say the requested review is incomplete
+            err.print(f"[red]{failed} of {len(episode_files)} episode review(s) failed[/]")
+            raise typer.Exit(1)
     finally:
         if tmp is not None:
             tmp.cleanup()
