@@ -375,3 +375,102 @@ def test_tui_file_issues_leaves_notes_out_unless_selected(tmp_path, monkeypatch)
     run_app(path, script)
     assert seen["notes_left"] >= 1
     assert not any(t.startswith("config.yaml") for t in seen["titles"])
+
+
+# -- issue eligibility (#47) ---------------------------------------------------------
+
+
+def _ai_id(path: Path) -> str:
+    return next(f.id for f in load(path).findings if f.source == "ai")
+
+
+def test_eligible_leaves_out_stale_and_filed():
+    a = Finding("warning", "ai", "A", location="episodes/01.md", code="AI203", quote="x", source="ai")
+    b = Finding("warning", "ai", "B", location="episodes/01.md", code="AI204", quote="y", source="ai")
+    c = Finding("warning", "ai", "C", location="episodes/01.md", code="AI205", quote="z", source="ai", stale=True)
+    fresh, skipped, stale = issues.eligible([a, b, c], {a.id})
+    assert fresh == [b] and skipped == 1 and stale == 1
+
+
+def test_tui_never_files_a_selected_stale_finding(tmp_path, monkeypatch):
+    lesson, path = checked_lesson(tmp_path)
+    ai_id = _ai_id(path)
+    gh = FakeGh()
+    monkeypatch.setattr(issues, "_gh", gh)
+    seen = {}
+
+    async def script(tui, pilot):
+        # review -> edit -> re-check: the AI finding goes stale
+        (lesson / "episodes" / "01.md").write_text(EPISODE + "\nMore text.\n")
+        await pilot.press("r")
+        await pilot.pause()
+        seen["stale"] = tui._by_id(ai_id).stale
+        tui.results.github_base = BASE  # the re-check found no git origin in tmp_path
+        tui.selected = {ai_id}
+        await pilot.press("c")
+        await tui.workers.wait_for_complete()
+        await pilot.pause()
+        seen["screen"] = type(tui.screen).__name__
+        if seen["screen"] == "ConfirmIssues":
+            await pilot.press("y")
+            await tui.workers.wait_for_complete()
+
+    run_app(path, script)
+    assert seen["stale"] is True
+    assert seen["screen"] != "ConfirmIssues"
+    assert gh.bodies == []
+
+
+def test_tui_drops_findings_ignored_during_the_gh_lookup(tmp_path, monkeypatch):
+    _, path = checked_lesson(tmp_path)
+    gh = FakeGh()
+    release = threading.Event()
+
+    def slow(args, input_text=None):
+        if args[:2] == ["issue", "list"]:
+            release.wait(5)
+        return gh(args, input_text)
+
+    monkeypatch.setattr(issues, "_gh", slow)
+    seen = {}
+
+    async def script(tui, pilot):
+        await pilot.press("space", "space")  # two findings selected
+        first = sorted(tui.selected)[0]
+        await pilot.press("c")
+        tui.selected = {first}  # the user ignores `first` while gh is busy
+        await pilot.press("i")
+        release.set()
+        await tui.workers.wait_for_complete()
+        await pilot.pause()
+        seen["ignored"] = first
+        seen["drafted"] = (
+            [f.id for d in tui.screen.drafts for f in d.findings]
+            if type(tui.screen).__name__ == "ConfirmIssues" else []
+        )
+        await pilot.press("n")
+
+    run_app(path, script)
+    assert seen["ignored"] not in seen["drafted"]
+
+
+def test_tui_confirm_counts_selected_findings_hidden_by_a_filter(tmp_path, monkeypatch):
+    _, path = checked_lesson(tmp_path)
+    ai_id = _ai_id(path)
+    monkeypatch.setattr(issues, "_gh", FakeGh())
+    seen = {}
+
+    async def script(tui, pilot):
+        tui.selected = {ai_id}
+        await pilot.press("a")  # source filter: all -> mechanical hides the AI finding
+        await pilot.pause()
+        seen["visible"] = ai_id in {f.id for f in tui.visible}
+        await pilot.press("c")
+        await tui.workers.wait_for_complete()
+        await pilot.pause()
+        seen["hidden"] = getattr(tui.screen, "hidden", None)
+        await pilot.press("n")
+
+    run_app(path, script)
+    assert seen["visible"] is False
+    assert seen["hidden"] == 1
