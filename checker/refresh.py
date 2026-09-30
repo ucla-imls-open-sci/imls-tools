@@ -18,7 +18,8 @@ policy:
   since the review, rather than silently dropped or silently trusted.
 - **IDs.** Mechanical finding IDs are assigned once by run_checks(), before
   any ignore rules apply, and are never renumbered. AI findings are
-  numbered among themselves.
+  numbered once, among the new findings from a review, and keep that
+  number on every later refresh.
 """
 
 from __future__ import annotations
@@ -110,6 +111,16 @@ def _load_existing(path: Path) -> Results | None:
         return None
 
 
+def _keep_ai_ids(ai: list[Finding]) -> list[Finding]:
+    """Retained AI findings keep the occurrence they were saved with.
+    Renumbering them would hand an ignored finding's ID (dropped from the
+    saved set) to its surviving sibling. Only a collision, from a results
+    file saved before occurrences were, gets renumbered."""
+    if len({f.id for f in ai}) == len(ai):
+        return ai
+    return assign_occurrences(ai)
+
+
 def _same_target(old: Results, target_id: str, target: str) -> bool:
     if old.target_id:
         return old.target_id == target_id
@@ -169,7 +180,7 @@ def refresh(
             if hashes.get(f.location or "") != old.file_hashes.get(f.location or ""):
                 f.stale = True
             ai.append(f)
-    ai = assign_occurrences(ai)  # AI numbered among themselves; mechanical IDs untouched
+    ai = _keep_ai_ids(ai)
     notes.stale = sum(1 for f in ai if f.stale)
 
     kept, ignored = rules.apply(mechanical + ai)
@@ -195,13 +206,15 @@ def refresh(
 
 def merge_ai_review(results: Results, reviewed: dict[str, list[Finding]], lesson_dir: Path, path: Path) -> Results:
     """Replace the AI findings for each reviewed location with the new ones
-    (fresh, not stale), re-number AI findings among themselves, apply
-    .wbcheck.toml, and save."""
+    (fresh, not stale), numbered among themselves; other AI findings keep
+    their IDs. Apply .wbcheck.toml and save."""
     rules = load_ignore(lesson_dir)
-    ai = [f for f in results.findings if f.source == "ai" and f.location not in reviewed]
-    for new in reviewed.values():
-        ai.extend(new)
-    ai = assign_occurrences(ai)
+    kept = [f for f in results.findings if f.source == "ai" and f.location not in reviewed]
+    # Only the new findings are numbered, among themselves: they replace
+    # everything saved for their locations, and the kept ones (other
+    # locations) keep their IDs.
+    new = assign_occurrences([f for found in reviewed.values() for f in found])
+    ai = kept + new
     mechanical = [f for f in results.findings if f.source != "ai"]
     results.findings, ignored_ai = rules.apply(mechanical + ai)
     results.ignored += ignored_ai

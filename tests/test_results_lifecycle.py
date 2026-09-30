@@ -196,6 +196,50 @@ def test_reworded_ai_finding_on_same_quote_keeps_its_id(tmp_path, monkeypatch):
     assert ai(load(default_results_path(d)))[0].id == first
 
 
+# -- #49: AI IDs survive ignoring a sibling ------------------------------------------------
+
+
+def _two_same_anchor_findings(text, location, mechanical, backend, model=None, glossary_text="", effort="high"):
+    return ReviewResult(summary="ok", findings=[
+        Finding("warning", "ai", msg, location=location, line=15, hint="Fix.",
+                code="AI203", quote="Some content here.", source="ai", scope="pacing")
+        for msg in ("Too terse.", "No example.")
+    ])
+
+
+def test_ignoring_one_same_anchor_ai_finding_keeps_the_other(tmp_path, monkeypatch):
+    d = make_lesson(tmp_path)
+    monkeypatch.setattr("checker.ai_review.review_episode", _two_same_anchor_findings)
+    runner.invoke(app, ["review", str(d)])
+    first, second = sorted(ai(load(default_results_path(d))), key=lambda f: f.occurrence)
+    assert first.id != second.id
+    (d / ".wbcheck.toml").write_text(f'[ignore]\nids = ["{first.id}"]\n')
+    for _ in range(3):
+        assert runner.invoke(app, ["check", str(d), "-q"]).exit_code in (0, 1)
+        assert [f.id for f in ai(load(default_results_path(d)))] == [second.id]
+
+
+def test_rereview_numbers_new_findings_without_touching_other_episodes(tmp_path, monkeypatch):
+    d = make_lesson(tmp_path, episodes={"01.md": episode(), "02.md": episode()})
+    monkeypatch.setattr("checker.ai_review.review_episode", _two_same_anchor_findings)
+    runner.invoke(app, ["review", str(d)])
+    before = {f.id for f in ai(load(default_results_path(d))) if f.location == "episodes/02.md"}
+    runner.invoke(app, ["review", str(d), "--episode", "01.md"])
+    after = ai(load(default_results_path(d)))
+    assert {f.id for f in after if f.location == "episodes/02.md"} == before
+    assert len({f.id for f in after}) == len(after) == 4
+
+
+def test_colliding_saved_ai_ids_are_renumbered():
+    from checker.refresh import _keep_ai_ids
+
+    same = [Finding("warning", "ai", m, location="episodes/01.md", code="AI203", quote="q", source="ai")
+            for m in ("a", "b")]  # both occurrence 0, as an older results file would have them
+    assert same[0].id == same[1].id
+    kept = _keep_ai_ids(same)
+    assert len({f.id for f in kept}) == 2
+
+
 # -- compatibility -------------------------------------------------------------------
 
 
