@@ -187,10 +187,14 @@ def plan_issues(
         raise ValueError(f"unknown group_by `{group_by}`, expected auto, file, or rule")
     threshold = SEVERITY_ORDER[min_severity]
     filed = already_filed or set()
+    # Stale AI findings (file changed since the review) may no longer
+    # describe the text, so they're never filed; re-review first.
     selected = [
         f
         for f in results.findings
-        if SEVERITY_ORDER.get(f.severity, 9) <= threshold and (source == "all" or f.source == source)
+        if SEVERITY_ORDER.get(f.severity, 9) <= threshold
+        and (source == "all" or f.source == source)
+        and not f.stale
     ]
     skipped = sum(1 for f in selected if f.id in filed)
     fresh = [f for f in selected if f.id not in filed]

@@ -32,9 +32,8 @@ from textual.widgets import DataTable, Footer, Header, Input, Static, Tree
 
 from checker import issues as issues_mod
 from checker.console import SEVERITY_ICON, SEVERITY_STYLE, _source_excerpt
-from checker.ignore import add_ignored_ids, load_ignore
-from checker.lesson_check import run_checks
-from checker.report import SEVERITY_ORDER, Finding, assign_occurrences
+from checker.ignore import add_ignored_ids
+from checker.report import SEVERITY_ORDER, Finding
 from checker.results import Results, save
 
 SEVERITY_FILTERS = ("info", "warning", "error")  # minimum severity shown
@@ -252,7 +251,7 @@ class FindingsApp(App):
                 Text(f.code or f.category, style="bold"),
                 Path(f.location).name if f.location else "",
                 str(f.line) if f.line is not None else "",
-                f.message,
+                Text(f"[stale] {f.message}", style="dim") if f.stale else f.message,
                 key=f.id,
             )
         if keep is not None and keep.id in {f.id for f in self.visible}:
@@ -274,6 +273,8 @@ class FindingsApp(App):
         ]
         if f.quote:
             parts.append(Text(f"“{f.quote}”", style="italic"))
+        if f.stale:
+            parts.append(Text("stale: the file changed after this AI review; re-run `wbcheck review`", style="yellow"))
         if f.hint:
             parts.append(Text(f"Fix: {f.hint}"))
         for label, url in f.guides:
@@ -391,16 +392,18 @@ class FindingsApp(App):
         if self.lesson_dir is None:
             self.notify("Checked from a temporary clone, can't re-run here.", severity="error")
             return False
+        from checker.refresh import refresh
+
+        # the shared refresh: fresh mechanical findings and git context, AI
+        # findings kept (and marked stale if their file changed), IDs stable
         try:
-            rules = load_ignore(self.lesson_dir)
+            self.results, notes = refresh(self.results.target, self.lesson_dir, False, self.results_path)
         except ValueError as exc:
             self.notify(str(exc), severity="error")
             return False
-        mechanical, ignored = rules.apply(run_checks(self.lesson_dir))
-        ai = [f for f in self.results.findings if f.source == "ai"]
-        self.results.findings = assign_occurrences(mechanical + ai)
-        self.results.ignored = ignored
-        save(self.results, self.results_path)
+        if notes.stale:
+            self.notify(f"{notes.stale} AI finding(s) are stale: their file changed since the review",
+                        severity="warning")
         self.selected &= {f.id for f in self.results.findings}
         self.refresh_all()
         return True

@@ -26,19 +26,18 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.text import Text
 
 from checker import __version__
-from checker.cli import _blame_map, _dirty_files, _github_blob_base, _read_glossary, _resolve_target
+from checker.cli import _read_glossary, _resolve_target
 from checker.console import render_ai_reviews, render_findings, render_results
 from checker.ignore import IgnoreRules, load_ignore
-from checker.lesson_check import read_lesson_metadata, run_checks
+from checker.lesson_check import run_checks
 from checker.report import (
     SEVERITY_ORDER,
     Finding,
-    assign_occurrences,
     render_html_via_quarto,
     render_markdown,
     render_pdf_via_quarto,
 )
-from checker.results import Results, default_results_path, load, save
+from checker.results import Results, default_results_path, load
 
 app = typer.Typer(
     name="wbcheck",
@@ -67,15 +66,6 @@ def _main(
     pass
 
 
-def _results_path_for(lesson_dir: Path, is_clone: bool, override: Path | None) -> Path:
-    """Explicit --results wins; a temporary clone saves under the current
-    directory (the clone is deleted after the run); otherwise inside the
-    lesson."""
-    if override is not None:
-        return override
-    return default_results_path(Path.cwd() if is_clone else lesson_dir)
-
-
 def _load_ignore_or_exit(lesson_dir: Path) -> IgnoreRules:
     try:
         return load_ignore(lesson_dir)
@@ -95,28 +85,36 @@ def _fails(results: Results, fail_on: str) -> bool:
     return any(SEVERITY_ORDER.get(f.severity, 9) <= threshold for f in results.findings)
 
 
-def _run_check(
-    target: str, episode: str | None, blame: bool
-) -> tuple[Results, Path, tempfile.TemporaryDirectory | None]:
-    """Run the mechanical checks. Returns the results, the lesson directory,
-    and the temp-clone handle (None for a local path) for the caller to
-    clean up."""
+def _refresh(
+    target: str, episode: str | None, blame: bool, results_override: Path | None
+) -> tuple[Results, Path, tempfile.TemporaryDirectory | None, Path]:
+    """Resolve `target`, bring its saved results up to date (see
+    checker/refresh.py for the merge policy), and report anything notable.
+    Returns the results, the lesson directory, the temp-clone handle (None
+    for a local path; the caller cleans it up), and the results path."""
+    from checker.refresh import normalize_target, refresh, results_path_for
+
     lesson_dir, tmp = _resolve_target(target)
-    findings, ignored = _load_ignore_or_exit(lesson_dir).apply(run_checks(lesson_dir, episode_filter=episode))
-    github_base = _github_blob_base(lesson_dir)
-    results = Results(
-        target=target,
-        lesson_dir=None if tmp is not None else str(lesson_dir),
-        findings=findings,
-        metadata=read_lesson_metadata(lesson_dir),
-        blame=_blame_map(lesson_dir, findings) if blame else None,
-        github_base=github_base,
-        dirty_files=sorted(_dirty_files(lesson_dir)) if github_base else [],
-        ignored=ignored,
-    )
+    is_clone = tmp is not None
+    path = results_path_for(normalize_target(target, lesson_dir, is_clone), lesson_dir, is_clone, results_override)
+    try:
+        results, notes = refresh(target, lesson_dir, is_clone, path, episode=episode, blame=blame)
+    except ValueError as exc:  # invalid .wbcheck.toml
+        if tmp is not None:
+            tmp.cleanup()
+        err.print(f"[red]{exc}[/]")
+        raise typer.Exit(2) from exc
+    if notes.replaced_target:
+        err.print(f"[yellow]replaced saved results for a different lesson[/] ({notes.replaced_target})")
+    if notes.stale:
+        err.print(f"[yellow]{notes.stale} AI finding(s) are stale[/]: their file changed since the review; "
+                  "re-run `wbcheck review` for those episodes")
+    if results.scope == "partial":
+        err.print("[dim]partial results: only the requested episode is up to date; run a full check to refresh "
+                  "the rest[/]")
     if blame and not results.blame:
         err.print("[yellow]--blame found no authors[/] (is the lesson a git repo with history?)")
-    return results, lesson_dir, tmp
+    return results, lesson_dir, tmp, path
 
 
 @app.command()
@@ -148,9 +146,8 @@ def check(
     if fail_on not in FAIL_ON:
         err.print(f"[red]--fail-on must be one of {', '.join(FAIL_ON)}[/], got `{fail_on}`")
         raise typer.Exit(2)
-    results, lesson_dir, tmp = _run_check(target, episode, blame)
+    results, lesson_dir, tmp, path = _refresh(target, episode, blame, results_path)
     try:
-        path = save(results, _results_path_for(lesson_dir, tmp is not None, results_path))
         shown = _changed_view(results, lesson_dir, since) if (changed or since) else results
         if not quiet:
             render_results(Console(), shown, show_source=show_source)
@@ -214,17 +211,10 @@ def review(
         raise typer.Exit(2)
     from checker.ai_review import review_episode
 
-    lesson_dir, tmp = _resolve_target(target)
+    # Always refresh first (under a second): the review then works from
+    # mechanical findings and file hashes that match the text it reads.
+    results, lesson_dir, tmp, path = _refresh(target, None, False, results_path)
     try:
-        path = _results_path_for(lesson_dir, tmp is not None, results_path)
-        if path.exists():
-            results = load(path)
-        else:
-            err.print("[dim]no saved results, running checks first[/]")
-            if tmp is not None:
-                tmp.cleanup()
-            results, lesson_dir, tmp = _run_check(target, episode, blame=False)
-
         episode_files = sorted(p for p in (lesson_dir / "episodes").glob("*") if p.suffix in (".md", ".Rmd"))
         if episode:
             episode_files = [p for p in episode_files if p.name == episode]
@@ -233,8 +223,7 @@ def review(
                 raise typer.Exit(2)
         glossary_text = _read_glossary(lesson_dir)
 
-        new_findings: list[Finding] = []
-        reviewed: set[str] = set()
+        reviewed: dict[str, list[Finding]] = {}
         with Progress(
             SpinnerColumn(),
             TextColumn("{task.description}"),
@@ -263,23 +252,17 @@ def review(
                     results.ai_reviews[label] = f"(AI review failed: {exc})"
                 else:
                     results.ai_reviews[label] = result.as_text()
-                    new_findings.extend(result.findings)
-                    reviewed.add(location)
+                    reviewed[location] = result.findings
                     if result.dropped:
                         err.print(f"[yellow]{p.name}:[/] dropped {result.dropped} finding(s) with unverifiable quotes")
                 progress.advance(task)
 
-        # A successful re-review supersedes that episode's earlier AI findings;
-        # a failed one leaves them in place.
-        results.findings = [
-            f for f in results.findings if not (f.source == "ai" and f.location in reviewed)
-        ] + new_findings
-        # Filter after numbering: ignore-file IDs were recorded post-numbering.
-        assign_occurrences(results.findings)
-        results.findings, ignored_ai = _load_ignore_or_exit(lesson_dir).apply(results.findings)
-        results.ignored += ignored_ai
-        new_findings = [f for f in new_findings if f in results.findings]
-        save(results, path)
+        # A successful re-review replaces that episode's earlier AI findings
+        # (fresh, not stale); a failed one leaves them in place.
+        from checker.refresh import merge_ai_review
+
+        results = merge_ai_review(results, reviewed, lesson_dir, path)
+        new_findings = [f for f in results.findings if f.source == "ai" and f.location in reviewed]
 
         console = Console()
         ai_only = Results(
@@ -456,6 +439,9 @@ def issues(
     console.print(table)
     if skipped:
         console.print(f"[dim]{skipped} finding(s) skipped, already in a wbcheck issue.[/]")
+    stale = sum(1 for f in results.findings if f.stale)
+    if stale:
+        console.print(f"[dim]{stale} stale AI finding(s) left out; re-run `wbcheck review` to refresh them.[/]")
     dirty = sorted({f.location for d in drafts for f in d.findings if f.location in set(results.dirty_files)})
     if dirty:
         err.print(
@@ -506,10 +492,9 @@ def tui(
             err.print(f"[red]no results at[/] {path}")
             raise typer.Exit(2)
         err.print("[dim]no saved results, running checks first[/]")
-        results, _, tmp = _run_check(str(lesson), None, blame=False)
+        _, _, tmp, path = _refresh(str(lesson), None, False, None)
         if tmp is not None:
             tmp.cleanup()
-        save(results, path)
     try:
         results = load(path)
     except ValueError as exc:
@@ -561,11 +546,7 @@ def fix(
         err.print(f"[red]{lesson_dir} doesn't look like a lesson[/] (no episodes/)")
         raise typer.Exit(2)
 
-    path = default_results_path(lesson_dir)
-    ai_kept = [f for f in load(path).findings if f.source == "ai"] if path.exists() else []
-    results, _, _ = _run_check(str(lesson_dir), None, blame=False)
-    results.findings = assign_occurrences(results.findings + ai_kept)
-    save(results, path)
+    results, _, _, path = _refresh(str(lesson_dir), None, False, None)
 
     threshold = SEVERITY_ORDER[min_severity]
     todo = [
@@ -627,7 +608,7 @@ def fix(
             except ValueError as exc:
                 err.print(f"[yellow]skipped:[/] {exc}")
         err.print(f"[green]Applied {applied} fix(es).[/] Re-checking…")
-        _report_progress(lesson_dir, path, {f.id for f in todo}, ai_kept)
+        _report_progress(lesson_dir, {f.id for f in todo})
         return
 
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
@@ -637,7 +618,7 @@ def fix(
         qf.write_text("\n".join(quickfix_lines(todo, lesson_dir)) + "\n")
         err.print(f"[dim]{len(todo)} finding(s) in the quickfix list: ]q or :cnext to move, :copen to list them[/]")
         subprocess.run([*editor.split(), "-q", str(qf)], check=False)
-        _report_progress(lesson_dir, path, before, ai_kept)
+        _report_progress(lesson_dir, before)
         return
 
     for n, f in enumerate(todo, 1):
@@ -660,14 +641,13 @@ def fix(
             console.print("[yellow]✗ still reported[/]")
         else:
             console.print("[green]✔ fixed[/]")
-    _report_progress(lesson_dir, path, before, ai_kept)
+    _report_progress(lesson_dir, before)
 
 
-def _report_progress(lesson_dir: Path, results_path: Path, before: set[str], ai_kept: list[Finding]) -> None:
-    """Re-check, save, and say how many of `before` are gone."""
-    results, _, _ = _run_check(str(lesson_dir), None, blame=False)
-    results.findings = assign_occurrences(results.findings + ai_kept)
-    save(results, results_path)
+def _report_progress(lesson_dir: Path, before: set[str]) -> None:
+    """Refresh (AI findings in edited files turn stale), and say how many of
+    `before` are gone."""
+    results, _, _, _ = _refresh(str(lesson_dir), None, False, None)
     now = {f.id for f in results.findings}
     gone = len(before - now)
     left = len(before & now)

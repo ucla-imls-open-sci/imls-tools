@@ -61,6 +61,13 @@ From an external review (`design/2026-09-29-codex-review-wbcheck.md`):
 - A review where every episode failed, or `--episode` matched nothing,
   exited 0.
 - Quote matching crashed on characters that case-fold to several (`ß`).
+- Saved results: `check` after `review` deleted AI findings; `check
+  --episode` left a partial snapshot that `review` reused; results from one
+  git URL could be merged into another's; ignoring a finding could hand its
+  ID to a sibling. Now one refresh policy (`checker/refresh.py`) records
+  target identity, commit, scope, and file fingerprints, marks AI findings
+  stale when their file changes, and never renumbers after filtering. AI
+  finding IDs come from the quoted text, not the model's wording.
 - The glossary moved out of the system prompt; Ollama calls got a timeout;
   `issues` reads up to 10,000 existing issues and refuses past that rather
   than risk duplicates; CI builds the wheel and checks its contents.

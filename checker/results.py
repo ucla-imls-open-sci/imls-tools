@@ -17,7 +17,8 @@ from pathlib import Path
 from checker import __version__
 from checker.report import Finding, LessonMetadata
 
-RESULTS_VERSION = 1
+RESULTS_VERSION = 2
+READABLE_VERSIONS = (1, 2)  # v1 lacks target_id/revision/scope/file_hashes; read with defaults
 RESULTS_DIRNAME = ".wbcheck"
 RESULTS_FILENAME = "results.json"
 
@@ -54,6 +55,10 @@ class Results:
     dirty_files: list[str] = field(default_factory=list)
     ai_reviews: dict[str, str] = field(default_factory=dict)
     ignored: int = 0  # findings suppressed by the lesson's .wbcheck.toml
+    target_id: str | None = None  # resolved lesson path, or host/owner/repo for a clone
+    revision: str | None = None  # git HEAD at check time
+    scope: str = "full"  # "full", or "partial" after an --episode check that couldn't merge
+    file_hashes: dict[str, str] = field(default_factory=dict)  # location -> content hash at check time
     generated: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     @property
@@ -83,6 +88,10 @@ class Results:
             "findings": [f.to_dict() for f in self.findings],
             "ai_reviews": self.ai_reviews,
             "ignored": self.ignored,
+            "target_id": self.target_id,
+            "revision": self.revision,
+            "scope": self.scope,
+            "file_hashes": self.file_hashes,
         }
         # default=str: config.yaml's unquoted `created:` is a datetime.date.
         return json.dumps(payload, indent=2, default=str)
@@ -92,7 +101,7 @@ class Results:
         """Parse a results file; raises ValueError on an unsupported version."""
         data = json.loads(text)
         version = data.get("version")
-        if version != RESULTS_VERSION:
+        if version not in READABLE_VERSIONS:
             raise ValueError(
                 f"results file version {version!r} is not supported (expected {RESULTS_VERSION}); "
                 "re-run `wbcheck check`"
@@ -108,6 +117,10 @@ class Results:
             dirty_files=list(git.get("dirty_files") or []),
             ai_reviews=dict(data.get("ai_reviews") or {}),
             ignored=int(data.get("ignored") or 0),
+            target_id=data.get("target_id"),
+            revision=data.get("revision"),
+            scope=data.get("scope") or "full",
+            file_hashes=dict(data.get("file_hashes") or {}),
             generated=data.get("generated") or "",
         )
 
@@ -117,8 +130,10 @@ def save(results: Results, path: Path) -> Path:
     `.wbcheck/` directory, also drops a `*` .gitignore so the results never
     get committed to the lesson by accident."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.parent.name == RESULTS_DIRNAME:
-        gitignore = path.parent / ".gitignore"
+    # the .wbcheck folder itself, even when results sit in a per-clone subfolder
+    wbcheck_dir = next((p for p in (path.parent, *path.parent.parents) if p.name == RESULTS_DIRNAME), None)
+    if wbcheck_dir is not None:
+        gitignore = wbcheck_dir / ".gitignore"
         if not gitignore.exists():
             gitignore.write_text("# Created by wbcheck, safe to delete.\n*\n")
     path.write_text(results.to_json())

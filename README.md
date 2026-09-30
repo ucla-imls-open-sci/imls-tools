@@ -102,7 +102,28 @@ TUI work from saved results without re-checking.
 
 A target can also be a git URL (`wbcheck check
 https://github.com/librarycarpentry/lc-git.git`). It's cloned to a temporary
-directory, and results are saved under `./.wbcheck/` instead.
+directory, and results are saved under `./.wbcheck/<host_owner_repo>/`
+instead, one folder per repo.
+
+**How saved results stay honest.** `check`, `review`, `fix`, and the TUI's
+re-check all update the file the same way:
+
+- The mechanical checks re-run every time (they take under a second), so
+  mechanical findings and git details always match the files as they are.
+- AI findings are kept, but each file's contents are fingerprinted, so if a
+  file changes after its AI review, those findings are marked **stale**:
+  shown with a note, never filed as issues, until you re-run `wbcheck review`.
+- The file records which lesson it belongs to (its path, or the repo for a
+  URL) and the git commit. Results saved for a different lesson are
+  replaced, never merged.
+- `check --episode NAME` updates that episode and keeps the rest only if
+  those files haven't changed; otherwise the results are marked partial
+  until the next full check. `review` always refreshes the whole lesson
+  first.
+- Finding IDs are assigned once, before anything is ignored, and never
+  renumbered, so ignoring one finding can't hand its ID to another. An AI
+  finding's ID comes from its rule, file, and quoted text, not the model's
+  wording, so a reworded re-review keeps the same ID.
 
 ## Commands
 
@@ -461,7 +482,7 @@ body. Before filing, `issues` reads the `wbcheck`-labelled issues in the
 repo, open or closed, and leaves out anything already filed, so a finding
 you close as won't-fix stays closed. That depends on the hidden ID and the
 `wbcheck` label staying on the issue, and on the finding's ID staying the
-same (a reworded AI finding gets a new one). If a repo ever has more than
+same (for AI findings that's the quoted text). If a repo ever has more than
 10,000 `wbcheck` issues, it refuses rather than risk duplicates. The repo defaults to the lesson's
 GitHub `origin`, and it warns first when files had uncommitted changes at
 check time, since their items can't link to GitHub.
