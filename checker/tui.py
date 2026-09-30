@@ -388,8 +388,16 @@ class FindingsApp(App):
             return
         path = self.lesson_dir / f.location
         editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
-        with self.suspend():
-            subprocess.run(editor_command(editor, path, f.line), check=False)
+        command = editor_command(editor, path, f.line)
+        try:
+            with self.suspend():
+                done = subprocess.run(command, check=False)
+        except OSError as exc:
+            self.notify(f"Couldn't start `{command[0]}` ({exc.strerror or exc}). "
+                        "Set $VISUAL or $EDITOR to an editor on your PATH.", severity="error", timeout=10)
+            return
+        if done.returncode != 0:
+            self.notify(f"`{command[0]}` exited with status {done.returncode}.", severity="warning")
         # Back from the editor: re-check so a fixed finding drops off the list.
         if not self._recheck():
             return
