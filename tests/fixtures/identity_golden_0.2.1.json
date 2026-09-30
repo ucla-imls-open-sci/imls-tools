@@ -1,0 +1,68 @@
+[
+ {
+  "code": "WB009",
+  "location": "config.yaml",
+  "line": null,
+  "id": "399666acb4f3"
+ },
+ {
+  "code": "WB010",
+  "location": "config.yaml",
+  "line": null,
+  "id": "5491c899011b"
+ },
+ {
+  "code": "WB212",
+  "location": "episodes/01-intro.md",
+  "line": 25,
+  "id": "3bb92852caae"
+ },
+ {
+  "code": "WB212",
+  "location": "episodes/01-intro.md",
+  "line": 33,
+  "id": "813c2720c172"
+ },
+ {
+  "code": "WB301",
+  "location": "episodes/01-intro.md",
+  "line": 29,
+  "id": "3f6e4abaa972"
+ },
+ {
+  "code": "WB301",
+  "location": "episodes/01-intro.md",
+  "line": 31,
+  "id": "2582e25b3656"
+ },
+ {
+  "code": "WB401",
+  "location": "episodes/01-intro.md",
+  "line": 12,
+  "id": "b861b5aaf6ec"
+ },
+ {
+  "code": "WB401",
+  "location": "episodes/01-intro.md",
+  "line": 13,
+  "id": "44e71e851885"
+ },
+ {
+  "code": "WB404",
+  "location": "episodes/01-intro.md",
+  "line": 21,
+  "id": "bc3c2ea225fe"
+ },
+ {
+  "code": "WB403",
+  "location": "episodes/01-intro.md",
+  "line": null,
+  "id": "4398000a1c14"
+ },
+ {
+  "code": "WB205",
+  "location": "episodes/01-intro.md",
+  "line": null,
+  "id": "66d841bbc8d4"
+ }
+]

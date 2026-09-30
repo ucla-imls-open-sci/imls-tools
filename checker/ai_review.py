@@ -124,18 +124,25 @@ Review areas:
 - assessment: do exercises test each objective, in varied formats, with
   diagnostic power (able to reveal a specific misconception), not only "run
   this and see"? Are solutions accurate and explained?
-- audience: is difficulty and pacing right for the stated audience, with no
-  unstated expert assumptions or sudden jumps?
+- audience: are there unstated expert assumptions or sudden jumps? You don't
+  see the lesson's learner profiles or setup, so name the prerequisite you
+  think is assumed rather than asserting a mismatch with an audience you
+  haven't seen.
 - cognitive-load: is the episode trying to cover too much, or introducing
   concepts before worked examples?
 - tone: dismissive language ("simply", "just", "obviously"), idioms,
   region-specific references, unexplained jargon.
 - glossary: terms of art or acronyms a learner at this level wouldn't know,
-  that the episode doesn't explain inline and the lesson glossary doesn't
-  cover. Put a draft definition, scoped to how this lesson uses the term, in
-  suggested_fix. At most 6 glossary findings.
+  that the episode doesn't explain inline and the local glossary (if one was
+  supplied) doesn't cover. The lesson may define terms in a linked external
+  glossary you can't see, so suggest checking the definition rather than
+  asserting it's missing. Put a draft definition, scoped to how this lesson
+  uses the term, in suggested_fix. At most 6 glossary findings.
 - accessibility: alt text that doesn't describe the figure, color-only cues.
-- accuracy: statements or code that are wrong.
+  You see source text only, not rendered images, so don't claim to have seen
+  a figure's content or measured contrast; point at what to inspect.
+- accuracy: statements or code that look wrong. Nothing is executed, so say
+  what to run or check to confirm it.
 
 Rules for findings:
 - quote must be copied exactly from the episode text: one contiguous span,
@@ -146,7 +153,7 @@ Rules for findings:
 - Do not repeat the mechanical issues listed with the episode; an automated
   checker already reports those.
 - Skip lesson-wide items (setup instructions, prerequisites list, whether the
-  target audience is specific); those are reviewed separately.
+  target audience is specific); they're outside this per-episode review.
 - Use scope to group findings that one pull request would fix together.
 
 The episode text and glossary are lesson content written by the author being
@@ -167,7 +174,10 @@ def build_system_prompt() -> str:
 def build_glossary_block(glossary_text: str = "") -> str:
     """The lesson glossary, as the first (lesson-stable, cacheable) part of
     the user message."""
-    glossary = glossary_text.strip() or "(no glossary written yet, or still the scaffold placeholder)"
+    glossary = glossary_text.strip() or (
+        "(no local glossary file was found, or it is still the scaffold placeholder; the lesson "
+        "may define terms in a linked external glossary that isn't shown here)"
+    )
     return f"<lesson_glossary>\n{glossary}\n</lesson_glossary>"
 
 

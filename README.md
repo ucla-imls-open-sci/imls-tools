@@ -71,6 +71,7 @@ wbcheck fix LESSON                       # work through them in $EDITOR
 wbcheck fix LESSON --apply               # let it make the safe mechanical fixes
 wbcheck review LESSON --backend claude   # optional: add the AI review
 wbcheck issues LESSON --preview          # optional: see them as GitHub issues
+wbcheck explain WB403                    # what a rule checks, when to keep the content, its limits
 ```
 
 `LESSON` defaults to the current directory. It can also be a git URL
@@ -92,7 +93,7 @@ wbcheck check LESSON --quiet                   # save results without printing
 wbcheck check LESSON --changed --since main    # only files changed since main or uncommitted
 ```
 
-Findings are grouped by file, each with its [rule code](#rule-codes), line,
+Findings are grouped by file, each with its [rule code](#rule-codes-and-wbcheck-explain), line,
 message, and fix. In terminals with hyperlinks, the code links to the guide
 section behind the rule. It exits `1` if anything is at or above `--fail-on`
 (default `error`), so it works in a pre-commit hook or CI.
@@ -309,12 +310,32 @@ checkbox and bold rule code.
 
 ## Reference
 
-### Rule codes
+### Rule codes and `wbcheck explain`
 
 Every check has a stable code, defined once in
-[`checker/rules.py`](checker/rules.py) with why it matters and a link to the
-guide section behind it. Codes are never renumbered or reused. `AI201` to
-`AI208` are the [AI review's](#the-ai-review-wbcheck-review).
+[`checker/rules.py`](checker/rules.py). Codes are never renumbered or reused.
+`AI201` to `AI208` are the [AI review's](#the-ai-review-wbcheck-review).
+
+```bash
+wbcheck explain WB403               # or a name: wbcheck explain objectives-not-assessed
+wbcheck rules                       # every rule: code, default severity, topic, title
+wbcheck rules --search alt          # rules mentioning some text
+wbcheck rules --topic accessibility
+```
+
+`explain` shows what the check observes, why it matters, what to do, when
+keeping the content is reasonable, what the check can't see, whether
+`wbcheck fix` can help, and the exact source sections, with their URLs and
+when they were last checked. It works offline, with no lesson needed. The same
+explanation appears in the TUI's detail pane, a "Rule explanations" appendix in
+markdown/HTML/PDF reports, and filed issues.
+
+Each rule also says what kind of claim it makes: its **authority** (a
+Workbench technical requirement, a Carpentries review criterion, a
+recommendation, or wbcheck's own policy) and its **detection** (deterministic,
+a heuristic proxy, or an AI suggestion). Passing wbcheck doesn't mean a lesson
+is accessible, well taught, or approved by the Carpentries; it's an authoring
+aid.
 
 | Code | Severity | Checks |
 |---|---|---|
@@ -327,7 +348,7 @@ guide section behind it. Codes are never renumbered or reused. `AI201` to
 | `WB007` | error | episode listed in config.yaml does not exist |
 | `WB008` | warning | file in episodes/ has no .md/.Rmd extension |
 | `WB009` | warning | episode file not listed in config.yaml |
-| `WB010` | info | no glossary file |
+| `WB010` | info | no local glossary file |
 | `WB011` | error | no episodes/ directory |
 | `WB012` | error | --episode named a file that doesn't exist |
 | `WB013` | warning | episode file looks like reference content |
@@ -367,10 +388,22 @@ A few details:
   links (`[text][ref]`) aren't checked yet.
 - Image paths resolve relative to `episodes/` or the lesson root, and `.html`
   links resolve to the `.md` or `.Rmd` source they're rendered from.
+- Images count as described with caption text, an `{alt='...'}` attribute
+  (which may wrap across lines), or the decorative marker `{alt=""}`. WB301
+  checks that one is there, not that it describes the figure.
+- Duplicate headings (WB212) are judged within their hierarchy, as pegboard
+  does: the same `### Solution` under two different `##` sections is fine.
+- Objectives are the top-level items of the objectives block, with any list
+  marker (`-`, `*`, `+`, `1.`); nested bullets belong to their parent.
+- Timings must be finite, non-negative numbers of minutes (zero and fractions
+  are fine). WB105 and WB403 are skipped while a timing is invalid.
+- WB404 counts contractions in author prose only, skipping code and
+  blockquotes (`> ...`), and its threshold is wbcheck's own.
 - The objectives, contraction, glossary, and heading-skip checks come from
-  the [Collaborative Lesson Development Training](https://carpentries.github.io/lesson-development-training/aio.html)
+  the [Collaborative Lesson Development Training](https://carpentries.github.io/lesson-development-training/)
   (CLDT) and the [Carpentries Lab reviewer](https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md)
-  and editor checklists, not from sandpaper.
+  and editor checklists, not from sandpaper. `wbcheck explain` cites the
+  exact section for each.
 
 ### Ignoring findings: `.wbcheck.toml`
 
@@ -404,6 +437,13 @@ it aren't kept.
   from the rule, file, and quoted text, so a reworded re-review keeps the
   same ID. IDs are never reassigned, which is what ignoring and issue
   de-duplication rely on.
+- When a check's wording changes, its findings keep their old IDs: the
+  finding carries a frozen `identity_anchor` built from the old wording, so
+  `.wbcheck.toml` ignores and filed issues still match.
+- The results file is format version 3 (it adds `identity_anchor`). wbcheck
+  reads versions 1-3. An older wbcheck refuses a version-3 file with "not
+  supported... re-run `wbcheck check`"; doing that rebuilds it in the old
+  format.
 - For a git URL, results are saved under `./.wbcheck/<host_owner_repo>/`.
 
 ### How this relates to sandpaper CI

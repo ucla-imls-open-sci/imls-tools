@@ -406,7 +406,10 @@ def test_objectives_with_zero_exercises_is_warning(tmp_path):
         )
     )
     findings = check_episode(path, lesson_dir)
-    assert any("exercises: 0" in f.message for f in findings)
+    wb403 = [f for f in findings if f.code == "WB403"]
+    assert len(wb403) == 1
+    assert "`exercises` is 0" in wb403[0].message
+    assert "assesses" not in wb403[0].message  # observation only, no claim about assessment
 
 
 def test_objectives_with_nonzero_exercises_is_silent(tmp_path):

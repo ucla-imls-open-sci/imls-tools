@@ -38,6 +38,18 @@ SUGGESTION_CODES = ("WB401", "WB009")
 AUTOFIX_CODES = SAFE_FIX_CODES + SUGGESTION_CODES
 
 
+def fix_capability(code: str | None) -> str:
+    """How `wbcheck fix` can help with a rule, from the handlers below:
+    "conditional-automatic" (--apply, only where the source still matches),
+    "editorial" (--suggest, each change confirmed on its own), or "none".
+    Rule help reads this rather than storing its own copy."""
+    if code in SAFE_FIX_CODES:
+        return "conditional-automatic"
+    if code in SUGGESTION_CODES:
+        return "editorial"
+    return "none"
+
+
 # -- changed files ---------------------------------------------------------------
 
 

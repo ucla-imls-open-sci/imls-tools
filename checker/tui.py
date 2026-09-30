@@ -32,6 +32,7 @@ from textual.widgets import DataTable, Footer, Header, Input, Static, Tree
 
 from checker import issues as issues_mod
 from checker.console import SEVERITY_ICON, SEVERITY_STYLE, _source_excerpt
+from checker.help import AI_NOTE, rule_help
 from checker.ignore import add_ignored_ids
 from checker.report import SEVERITY_ORDER, Finding
 from checker.results import Results, save
@@ -284,7 +285,9 @@ class FindingsApp(App):
             return
         parts: list = [
             Text.assemble(
-                (f"{SEVERITY_ICON.get(f.severity, '')} {f.code or f.category}  ", SEVERITY_STYLE.get(f.severity, "")),
+                # this finding's own severity, as a word, not only icon/color
+                (f"{SEVERITY_ICON.get(f.severity, '')} {f.severity} {f.code or f.category}  ",
+                 SEVERITY_STYLE.get(f.severity, "")),
                 (f"{f.location or ''}{':' + str(f.line) if f.line else ''}", "dim"),
                 (f"  [{f.source}{' · ' + f.scope if f.scope else ''}]", "dim"),
             ),
@@ -294,10 +297,24 @@ class FindingsApp(App):
             parts.append(Text(f"“{f.quote}”", style="italic"))
         if f.stale:
             parts.append(Text("stale: the file changed after this AI review; re-run `wbcheck review`", style="yellow"))
+        if f.source == "ai":
+            parts.append(Text(AI_NOTE, style="dim"))
         if f.hint:
-            parts.append(Text(f"Fix: {f.hint}"))
-        for label, url in f.guides:
-            parts.append(Text(f"Guide: {label}", style=f"link {url} underline"))
+            parts.append(Text(f"Next: {f.hint}"))
+        help_ = rule_help(f.code)
+        if help_ is not None:
+            parts.append(Text(f"Rule: {help_.classification} · default severity {help_.rule.default_severity}",
+                              style="dim"))
+            parts.append(Text(f"Why: {help_.rule.why}"))
+            if help_.rule.limitations:
+                parts.append(Text(f"Limits: {help_.rule.limitations[0]}", style="dim"))
+            for s in help_.sources:
+                # the URL stays visible and copyable, not only a hyperlink
+                parts.append(Text.assemble((f"Source: {s.label} ", f"link {s.url} underline"), (s.url, "dim")))
+            parts.append(Text(f"More: wbcheck explain {f.code}", style="dim"))
+        else:
+            for label, url in f.guides:
+                parts.append(Text.assemble((f"Guide: {label} ", f"link {url} underline"), (url, "dim")))
         excerpt = _source_excerpt(self.lesson_dir, f, context=2)
         if excerpt is not None:
             parts.append(excerpt)

@@ -149,7 +149,7 @@ def test_json_findings_carry_code_id_and_guides():
     assert out["code"] == "WB301"
     assert out["id"] == f.id
     assert out["source"] == "mechanical"
-    assert out["guides"][0]["url"].endswith("reviewer_guide.md#accessibility")
+    assert out["guides"][0]["url"].endswith("episodes.html#figures")
 
 
 def test_terminal_shows_code_and_rule_specific_guide():
@@ -164,7 +164,7 @@ def test_markdown_shows_code_and_all_rule_guides():
     text = render_markdown([f], "Report")
     assert "`WB303`" in text
     assert "reviewer_guide.md#accessibility" in text
-    assert "lesson-development-training/aio.html#accessibility" in text
+    assert "lesson-development-training/explanation.html#accessibility" in text
 
 
 def test_codeless_finding_falls_back_to_category_guide():

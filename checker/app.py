@@ -791,6 +791,49 @@ def _doctor_rows() -> list[tuple[str, bool | None, str]]:
 
 
 @app.command()
+def explain(
+    code: Annotated[str, typer.Argument(help="A rule code (WB403, ai208) or name (objectives-not-assessed).")],
+) -> None:
+    """Explain a rule: what it checks, why, what to do, when to keep the content, its limits, and sources.
+
+    Works offline, with no lesson or saved results needed.
+    """
+    from checker.help import render_text, resolve, rule_help, suggestions
+
+    rule = resolve(code)
+    if rule is None:
+        close = suggestions(code)
+        hint = f" Did you mean {', '.join(close)}?" if close else ""
+        err.print(f"[red]no rule `{code}`[/].{hint} [dim]List them with `wbcheck rules`.[/]", highlight=False)
+        raise typer.Exit(2)
+    typer.echo(render_text(rule_help(rule.code)))
+
+
+@app.command()
+def rules(
+    search: Annotated[str | None, typer.Option("--search", "-s", help="Only rules mentioning this text.")] = None,
+    topic: Annotated[
+        str | None,
+        typer.Option(help="Only one topic: metadata, structure, accessibility, pedagogy, prose, "
+                     "supporting-material, operations."),
+    ] = None,
+) -> None:
+    """List the rules: code, default severity, topic, title. `wbcheck explain CODE` for one in full."""
+    from checker.help import search as search_rules
+
+    try:
+        found = search_rules(search, topic)
+    except ValueError as exc:
+        err.print(f"[red]{exc}[/]", highlight=False)
+        raise typer.Exit(2) from exc
+    if not found:
+        err.print("no rules match", highlight=False)
+        raise typer.Exit(1)
+    for r in found:
+        typer.echo(f"{r.code}  {r.default_severity:<7}  {r.topic:<19}  {r.title}")
+
+
+@app.command()
 def doctor() -> None:
     """Check what's installed and which optional features are ready."""
     from rich.table import Table

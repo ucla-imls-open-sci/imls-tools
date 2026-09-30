@@ -131,7 +131,7 @@ def _finding_item(f: Finding, github_base: str | None, dirty: frozenset[str]) ->
     if f.quote:
         lines.append(f"  > {f.quote}")
     if f.hint:
-        lines.append(f"  Fix: {f.hint}")
+        lines.append(f"  Next: {f.hint}")
     lines.append(f"  <!-- wbcheck:id={f.id} -->")
     return lines
 
@@ -158,13 +158,16 @@ def _body(key: str, findings: list[Finding], results: Results) -> str:
     lines += ["### To fix", ""]
     for f in _sort_findings(findings):
         lines += _finding_item(f, results.github_base, dirty)
+    from checker.help import issue_summary, rule_help
+
     codes = sorted({f.code for f in findings if f.code})
-    rules = [r for r in (get_rule(c) for c in codes) if r is not None]
-    if rules:
+    helps = [h for h in (rule_help(c) for c in codes) if h is not None]
+    if helps:
         lines += ["", "### Why these matter", ""]
-        for rule in rules:
-            guides = " · ".join(f"[{label}]({url})" for label, url in rule.guides)
-            lines.append(f"- **{rule.code}** {rule.title}: {rule.why}" + (f" ({guides})" if guides else ""))
+        for h in helps:
+            lines += issue_summary(h)
+        lines.append("")
+        lines.append("`wbcheck explain CODE` has the full explanation for each rule.")
     lines += [
         "",
         "Re-run `wbcheck check` after fixing; items that no longer appear are done. "

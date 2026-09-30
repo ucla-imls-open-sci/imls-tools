@@ -1,0 +1,292 @@
+{
+ "version": 2,
+ "generated_by": {
+  "name": "carpentries-workbench-checker",
+  "version": "0.2.1"
+ },
+ "generated": "2026-09-30T19:46:05.981479+00:00",
+ "target": "identity_lesson",
+ "lesson_dir": null,
+ "lesson": {
+  "title": "Identity fixture",
+  "carpentry": null,
+  "life_cycle": "alpha",
+  "license": null,
+  "source": "https://example.org/lesson",
+  "contact": "a@b.org",
+  "created": "2026-01-01",
+  "authors": []
+ },
+ "git": {
+  "github_base": null,
+  "dirty_files": [],
+  "blame": null
+ },
+ "findings": [
+  {
+   "severity": "warning",
+   "category": "config",
+   "message": "episodes/02-draft.md exists but is not listed in config.yaml `episodes:`",
+   "location": "config.yaml",
+   "hint": "Add it to the episodes list so it's included and ordered in the build.",
+   "line": null,
+   "code": "WB009",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "399666acb4f3",
+   "guides": [
+    {
+     "label": "Workbench: Configuration",
+     "url": "https://carpentries.github.io/sandpaper-docs/episodes.html#configuration"
+    }
+   ]
+  },
+  {
+   "severity": "info",
+   "category": "config",
+   "message": "no glossary file found (learners/reference.md)",
+   "location": "config.yaml",
+   "hint": "Add learners/reference.md with the key terms your episodes use. This check only looks for the file, not its contents.",
+   "line": null,
+   "code": "WB010",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "5491c899011b",
+   "guides": [
+    {
+     "label": "Lab reviewer checklist: Supporting information",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md#supporting-information"
+    },
+    {
+     "label": "CLDT: Glossary of terms",
+     "url": "https://carpentries.github.io/lesson-development-training/aio.html#glossary-of-terms"
+    }
+   ]
+  },
+  {
+   "severity": "warning",
+   "category": "headings",
+   "message": "heading `Example` on line 25 duplicates the one on line 19",
+   "location": "episodes/01-intro.md",
+   "hint": "Give each challenge/solution/exercise a unique, descriptive heading instead of reusing a generic one.",
+   "line": 25,
+   "code": "WB212",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "3bb92852caae",
+   "guides": [
+    {
+     "label": "Lab editor checklist: Accessibility",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/editor_guide.md#accessibility"
+    }
+   ]
+  },
+  {
+   "severity": "warning",
+   "category": "headings",
+   "message": "heading `Example` on line 33 duplicates the one on line 19",
+   "location": "episodes/01-intro.md",
+   "hint": "Give each challenge/solution/exercise a unique, descriptive heading instead of reusing a generic one.",
+   "line": 33,
+   "code": "WB212",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 1,
+   "id": "813c2720c172",
+   "guides": [
+    {
+     "label": "Lab editor checklist: Accessibility",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/editor_guide.md#accessibility"
+    }
+   ]
+  },
+  {
+   "severity": "warning",
+   "category": "links",
+   "message": "image on line 29 has no alt text: `fig/a.png`",
+   "location": "episodes/01-intro.md",
+   "hint": "Add descriptive alt text for accessibility.",
+   "line": 29,
+   "code": "WB301",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "3f6e4abaa972",
+   "guides": [
+    {
+     "label": "Lab reviewer checklist: Accessibility",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md#accessibility"
+    },
+    {
+     "label": "Workbench: Figures",
+     "url": "https://carpentries.github.io/sandpaper-docs/episodes.html#figures"
+    }
+   ]
+  },
+  {
+   "severity": "warning",
+   "category": "links",
+   "message": "image on line 31 has no alt text: `fig/a.png`",
+   "location": "episodes/01-intro.md",
+   "hint": "Add descriptive alt text for accessibility.",
+   "line": 31,
+   "code": "WB301",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 1,
+   "id": "2582e25b3656",
+   "guides": [
+    {
+     "label": "Lab reviewer checklist: Accessibility",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md#accessibility"
+    },
+    {
+     "label": "Workbench: Figures",
+     "url": "https://carpentries.github.io/sandpaper-docs/episodes.html#figures"
+    }
+   ]
+  },
+  {
+   "severity": "warning",
+   "category": "objectives",
+   "message": "objective opens with a phrase that can be hard to assess (\"Understand\"): \"Understand the data model\"",
+   "location": "episodes/01-intro.md",
+   "hint": "Try \"Explain the data model\", then make sure an exercise lets learners show it. The test is whether attainment is observable, not the opening word itself.",
+   "line": 12,
+   "code": "WB401",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "b861b5aaf6ec",
+   "guides": [
+    {
+     "label": "CLDT: SMART objectives",
+     "url": "https://carpentries.github.io/lesson-development-training/aio.html#smart-objectives"
+    },
+    {
+     "label": "Lab reviewer checklist: Design",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md#design"
+    }
+   ]
+  },
+  {
+   "severity": "warning",
+   "category": "objectives",
+   "message": "objective opens with a phrase that can be hard to assess (\"Know\"): \"Know the field names\"",
+   "location": "episodes/01-intro.md",
+   "hint": "Try \"Identify the field names\", then make sure an exercise lets learners show it. The test is whether attainment is observable, not the opening word itself.",
+   "line": 13,
+   "code": "WB401",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "44e71e851885",
+   "guides": [
+    {
+     "label": "CLDT: SMART objectives",
+     "url": "https://carpentries.github.io/lesson-development-training/aio.html#smart-objectives"
+    },
+    {
+     "label": "Lab reviewer checklist: Design",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md#design"
+    }
+   ]
+  },
+  {
+   "severity": "info",
+   "category": "style",
+   "message": "6 contractions found (89.6 per 1,000 words)",
+   "location": "episodes/01-intro.md",
+   "hint": "Consider spelling them out (don't -> do not) for translation and ESL learners. The threshold is a local heuristic, not an official Carpentries rule.",
+   "line": 21,
+   "code": "WB404",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "bc3c2ea225fe",
+   "guides": [
+    {
+     "label": "Lab reviewer checklist: Accessibility",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md#accessibility"
+    }
+   ]
+  },
+  {
+   "severity": "warning",
+   "category": "objectives",
+   "message": "3 objective(s) declared but exercises: 0 -- nothing in this episode formally assesses them",
+   "location": "episodes/01-intro.md",
+   "hint": "Add a challenge, discussion, or other formative-assessment checkpoint that lets learners show each objective.",
+   "line": null,
+   "code": "WB403",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "4398000a1c14",
+   "guides": [
+    {
+     "label": "CLDT: Formative assessment",
+     "url": "https://carpentries.github.io/lesson-development-training/aio.html#assessments"
+    },
+    {
+     "label": "Lab reviewer checklist: Design",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/reviewer_guide.md#design"
+    }
+   ]
+  },
+  {
+   "severity": "info",
+   "category": "divs",
+   "message": "1 challenge(s) but only 0 solution(s)",
+   "location": "episodes/01-intro.md",
+   "hint": "Not every challenge needs a solution block, but double-check this is intentional.",
+   "line": null,
+   "code": "WB205",
+   "quote": null,
+   "source": "mechanical",
+   "scope": null,
+   "stale": false,
+   "occurrence": 0,
+   "id": "66d841bbc8d4",
+   "guides": [
+    {
+     "label": "Lab editor checklist: Content",
+     "url": "https://github.com/carpentries-lab/reviews/blob/main/docs/editor_guide.md#content"
+    },
+    {
+     "label": "Workbench: Exercises/challenges",
+     "url": "https://carpentries.github.io/sandpaper-docs/episodes.html#exerciseschallenges"
+    }
+   ]
+  }
+ ],
+ "ai_reviews": {},
+ "ignored": 0,
+ "target_id": null,
+ "revision": null,
+ "scope": "full",
+ "file_hashes": {}
+}
