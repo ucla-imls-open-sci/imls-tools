@@ -84,6 +84,7 @@ class Finding:
     quote: str | None = None
     source: str = "mechanical"
     scope: str | None = None  # AI findings: groups related findings into one PR-sized issue
+    stale: bool = False  # AI findings: the file changed after the review (see checker/refresh.py)
     # Nth repeat (in file order) of an otherwise-identical finding in the
     # same file, e.g. the 3rd duplicate `Exercise:` heading; set by
     # assign_occurrences(), 0 for the first/only one.
@@ -92,8 +93,14 @@ class Finding:
     @property
     def identity_key(self) -> str:
         """Rule code (or category) + file + normalized message: what makes
-        two findings "the same problem", before occurrence numbering."""
-        return f"{self.code or self.category}|{self.location or ''}|{_normalize_for_id(self.message)}"
+        two findings "the same problem", before occurrence numbering. AI
+        findings use their verified quote instead of the model's wording,
+        which changes between reviews while the quoted text doesn't."""
+        if self.source == "ai" and self.quote:
+            anchor = "q:" + " ".join(self.quote.casefold().split())
+        else:
+            anchor = _normalize_for_id(self.message)
+        return f"{self.code or self.category}|{self.location or ''}|{anchor}"
 
     @property
     def id(self) -> str:
@@ -397,6 +404,8 @@ def _render_file_finding_group(
         prefix = "- [ ]" if f.severity in ("error", "warning") else "-"
         where = _markdown_location_link(f.location or "General", f.line, github_base, dirty_files)
         quote = f' _“{f.quote}”_' if f.quote else ""
+        if f.stale:
+            quote += " _(stale: the file changed after this AI review; re-run `wbcheck review`)_"
         lines.append(f"> {prefix} {icon} {where} — `{_code_label(f)}` {f.message}{quote}")
     if guide_link:
         lines.append(">")

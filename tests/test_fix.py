@@ -252,7 +252,14 @@ def test_tui_open_rechecks_and_reports_fixed(tmp_path, monkeypatch):
     runner.invoke(app, ["check", str(lesson), "-q"])
     path = default_results_path(lesson)
     monkeypatch.setenv("EDITOR", "nvim")
-    monkeypatch.setattr("checker.tui.subprocess.run", lambda cmd, check: _fix_heading(lesson))
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):  # fake editor fixes the file; git stays real
+        if cmd[0] == "git":
+            return real_run(cmd, *args, **kwargs)
+        _fix_heading(lesson)
+
+    monkeypatch.setattr("checker.tui.subprocess.run", fake_run)
     seen = {}
 
     async def main():

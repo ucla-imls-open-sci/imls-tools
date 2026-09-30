@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import subprocess
 import threading
 from pathlib import Path
 
@@ -237,7 +238,14 @@ def test_tui_open_editor_runs_editor_at_line(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setenv("EDITOR", "nvim")
     monkeypatch.delenv("VISUAL", raising=False)
-    monkeypatch.setattr("checker.tui.subprocess.run", lambda cmd, check: calls.append(cmd))
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):  # the editor is fake; git (used by the re-check) is real
+        if cmd[0] == "git":
+            return real_run(cmd, *args, **kwargs)
+        calls.append(cmd)
+
+    monkeypatch.setattr("checker.tui.subprocess.run", fake_run)
 
     async def script(tui, pilot):
         tui.suspend = contextlib.nullcontext  # headless drivers can't suspend
