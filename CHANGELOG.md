@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-09-30)
 
 From the 2026-09-30 standards review (`design/2026-09-30-standards-audit.md`,
 `-rule-schema-help-proposal.md`, `-claude-standards-handoff.md`; review IDs
@@ -38,8 +38,10 @@ in brackets). The theme: say no more than the check can see.
 - AI review prompt: states that the model sees source text only (no rendered
   figures, no execution, no learner profiles), that a missing local glossary
   doesn't mean no glossary, and no longer claims lesson-wide items are
-  "reviewed separately" [STD-05, STD-11]. **Not yet evaluated on a live
-  review** (CONTRIBUTING asks for one when the prompt changes).
+  "reviewed separately" [STD-05, STD-11]. Checked against 0.2.1 on real
+  episodes with the Claude backend (`design/2026-09-30-ai-prompt-eval.md`):
+  same volume and reliability, better-hedged glossary and accessibility
+  findings; accuracy findings unchanged.
 - **Results file format version 3** adds `identity_anchor`. Versions 1-3 are
   read; wbcheck 0.2.1 and earlier refuse a v3 file ("not supported... re-run
   `wbcheck check`"), which rebuilds it in their format [STD-06].
@@ -68,12 +70,17 @@ in brackets). The theme: say no more than the check can see.
   away. Default severities, selected rules, issue grouping, and
   `--fail-on error` behaviour are unchanged.
 
+### Known issues
+- Local Ollama reviews silently truncate the prompt, because no context size
+  is set (#66). Use the Claude backend until that's fixed.
+
 ### Deferred
-- WB213's automatic fix moving to an editorial suggestion [STD-10]; WB012
-  becoming a command error (exit 2) instead of a finding [DES-03]; a TUI
-  help modal (F1) [DES-02]; per-challenge WB205, which needs an ID transition
-  plan first [STD-04, OPEN-02]; which div class orders Workbench accepts
-  [OPEN-01]; whether `created` feeds citation metadata [OPEN-05].
+- WB213's automatic fix moving to an editorial suggestion [STD-10] (#58); WB012
+  becoming a command error (exit 2) instead of a finding [DES-03] (#59); a TUI
+  help modal (F1) [DES-02] (#60); per-challenge WB205, which needs an ID
+  transition plan first [STD-04, OPEN-02] (#61); which div class orders
+  Workbench accepts [OPEN-01] (#62); whether `created` feeds citation metadata
+  [OPEN-05] (#63).
 
 ## 0.2.1 (2026-09-30)
 
