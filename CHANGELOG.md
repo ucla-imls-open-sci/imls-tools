@@ -24,9 +24,10 @@ issue filing. Tracked in #21 to #28; the design is in
   editor checklist.
 - **`wbcheck fix`**: work through findings in your editor. In vim/nvim they
   load into the quickfix list; other editors go one finding at a time. Both
-  re-check afterwards and report what was fixed. `--apply` offers safe
-  automatic fixes (WB103, WB009, WB213, WB401) as diffs; `--print` emits
-  quickfix lines.
+  re-check afterwards and report what was fixed. `--apply` offers the safe
+  fixes (WB103, WB213) as diffs; `--suggest` offers editorial ones (WB401
+  objective rewrites, WB009 listing an episode), each confirmed on its own
+  and never applied by `--yes`; `--print` emits quickfix lines.
 - **`check --changed [--since REF]`**: only show and count findings in files
   you've changed.
 - The TUI re-checks when you come back from the editor (`o`) and says

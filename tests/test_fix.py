@@ -13,7 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 from checker.app import app
-from checker.fix import apply_fix, changed_files, plan_autofixes, quickfix_lines, uses_quickfix
+from checker.fix import AUTOFIX_CODES, apply_fix, changed_files, plan_autofixes, quickfix_lines, uses_quickfix
 from checker.lesson_check import run_checks
 from checker.results import default_results_path, load
 
@@ -69,7 +69,8 @@ def codes(lesson: Path) -> list[str]:
 
 def test_autofix_heading_jump_and_objective(tmp_path):
     lesson = make_lesson(tmp_path)
-    fixes = plan_autofixes(run_checks(lesson), lesson)
+    assert {f.finding.code for f in plan_autofixes(run_checks(lesson), lesson)} == {"WB213"}  # safe tier only
+    fixes = plan_autofixes(run_checks(lesson), lesson, AUTOFIX_CODES)
     assert {f.finding.code for f in fixes} == {"WB213", "WB401"}
     for fx in fixes:
         assert fx.diff(lesson).startswith("--- a/episodes/01.md")
@@ -92,7 +93,7 @@ def test_autofix_unlisted_episodes_appended_in_name_order(tmp_path):
     lesson = make_lesson(tmp_path)
     for name in ("03.md", "02.md"):
         (lesson / "episodes" / name).write_text((lesson / "episodes" / "01.md").read_text())
-    fixes = plan_autofixes([f for f in run_checks(lesson) if f.code == "WB009"], lesson)
+    fixes = plan_autofixes([f for f in run_checks(lesson) if f.code == "WB009"], lesson, AUTOFIX_CODES)
     for fx in fixes:
         apply_fix(fx)
     assert (lesson / "config.yaml").read_text().endswith("episodes:\n- 01.md\n- 02.md\n- 03.md\n")
@@ -102,7 +103,7 @@ def test_autofix_unlisted_episodes_appended_in_name_order(tmp_path):
 def test_autofix_skips_unlisted_file_that_looks_misplaced(tmp_path):
     lesson = make_lesson(tmp_path)
     (lesson / "episodes" / "glossary.md").write_text("# Terms\n")
-    fixes = plan_autofixes(run_checks(lesson), lesson)
+    fixes = plan_autofixes(run_checks(lesson), lesson, AUTOFIX_CODES)
     assert not [f for f in fixes if f.finding.code == "WB009"]
 
 
@@ -219,12 +220,36 @@ def test_fix_step_mode_for_other_editors(tmp_path, monkeypatch):
     assert "1 fixed, 1 still reported" in result.output
 
 
-def test_fix_apply_yes_applies_all_safe_fixes(tmp_path):
+def test_fix_apply_yes_applies_only_safe_fixes(tmp_path):
     lesson = make_lesson(tmp_path)
     result = runner.invoke(app, ["fix", str(lesson), "--apply", "--yes"])
     assert result.exit_code == 0, result.output
+    assert "Applied 1 fix(es)" in result.output  # WB213; the WB401 rewrite is a suggestion
+    text = (lesson / "episodes" / "01.md").read_text()
+    assert "### Too deep" in text and "- Understand the difference" in text
+
+
+def test_fix_suggest_asks_each_time_even_with_yes(tmp_path):
+    lesson = make_lesson(tmp_path)
+    result = runner.invoke(app, ["fix", str(lesson), "--suggest", "--yes"], input="n\n")
+    assert "each suggestion still asks" in result.output
+    assert "Apply this suggestion?" in result.output
+    assert "- Understand the difference" in (lesson / "episodes" / "01.md").read_text()
+    result = runner.invoke(app, ["fix", str(lesson), "--suggest"], input="y\n")
+    assert "Applied 1 fix(es)" in result.output
+    assert "- Explain the difference between copy and sync." in (lesson / "episodes" / "01.md").read_text()
+
+
+def test_fix_suggest_defaults_to_no(tmp_path):
+    lesson = make_lesson(tmp_path)
+    runner.invoke(app, ["fix", str(lesson), "--suggest"], input="\n")
+    assert "- Understand the difference" in (lesson / "episodes" / "01.md").read_text()
+
+
+def test_fix_apply_and_suggest_together(tmp_path):
+    lesson = make_lesson(tmp_path)
+    result = runner.invoke(app, ["fix", str(lesson), "--apply", "--suggest", "--yes"], input="y\n")
     assert "Applied 2 fix(es)" in result.output
-    assert "2 fixed" in result.output
 
 
 def test_fix_apply_prompts_and_respects_no(tmp_path):

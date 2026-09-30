@@ -17,14 +17,14 @@ below ("adopt what you adjudicated adopt, in the sequence you think").
 | 6a | fences ignore character/length | yes | adopt | PR #42: CommonMark fence tracking |
 | 6b | `::: {#q .questions}` read as a closing fence | yes | adopt | PR #42: `_div_fence` (Pandoc fenced_divs) everywhere |
 | 6c | image syntax in inline code flagged | yes | adopt | PR #42 |
-| 6d | reference-style links unchecked | yes | defer | new feature, not a bug |
+| 6d | reference-style links unchecked | yes | defer | new feature, not a bug: filed as #44 |
 | 6e | Pandoc as test oracle | not tried | defer | Pandoc isn't in the env; fixtures cover the reported cases |
 | 7 | check deletes AI findings; partial snapshots reused; TUI keeps stale state | yes (first two), by code (third) | adopt | PR B: one `refresh()` for check/review/fix/TUI; file fingerprints mark AI findings stale; scope `full`/`partial`; review always refreshes |
 | 8 | renumbering after ignore moves IDs; AI IDs depend on wording | yes | adopt | PR B: number before filtering, never after; AI identity from the quote |
 | 9 | `--code WB009` bypasses WB013 | yes | adopt | PR #42: safeguard re-derived from the file (also holds when WB013 is ignored) |
 | 10 | failed / unmatched reviews exit 0 | yes | adopt | PR #42: exit 1 on any failure (successes saved), 2 on no match |
 | 11 | `ß` case fold crashes quote location | yes | adopt | PR #42 |
-| D1 | WB401/WB009 are editorial, not safe | agree | **defer to Tim** | proposed: `--apply` = WB103, WB213; WB401/WB009 behind `--suggest`, always per-fix confirm |
+| D1 | WB401/WB009 are editorial, not safe | agree | adopt (Tim approved) | `--apply` = WB103, WB213 (`--yes` ok); `--suggest` = WB401, WB009, each confirmed on its own, default no, never under `--yes` |
 | D2 | quote checks don't prove review quality | agree | defer | issue #29 (evaluation set) |
 | D3 | glossary in the system prompt | agree | adopt | PR #42: cached user-message block; system prompt is tool-controlled text only |
 | D4 | no Ollama timeout | yes | adopt | PR #42: `Client(timeout=900)` |
@@ -51,5 +51,5 @@ found.
 
 ## Still open
 
-D1 (split `--apply`), 6d (reference links), D2/#29 (evaluation set), and
+6d (reference links, #44), D2/#29 (evaluation set), and
 the lesson-level AI review pass (#27).

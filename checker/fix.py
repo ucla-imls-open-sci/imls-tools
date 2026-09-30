@@ -1,15 +1,22 @@
 """Fixing findings locally: which files changed, vim/nvim quickfix output,
-and safe automatic fixes.
+automatic fixes, and suggestions.
 
-Automatic fixes are deliberately narrow: only findings where the right edit
-is unambiguous from the finding itself, each shown as a diff before it's
-written. Content (objectives, prose, placeholders) is left to the author,
-except WB401, whose rewrite is a suggestion the author confirms one by one.
+Two tiers, each shown as a diff before anything is written:
+
+Safe fixes (`wbcheck fix --apply`): the edit is unambiguous from the
+finding and changes no meaning, so `--yes` may apply them in bulk.
 
     WB103  `exercise:` typo in front matter  -> `exercises:`
-    WB009  episode file not in config.yaml   -> append it to `episodes:`
     WB213  heading skips a level             -> set it one below the previous heading
-    WB401  vague objective opener            -> the suggested rewrite (Understand -> Explain, ...)
+
+Suggestions (`wbcheck fix --suggest`): mechanically well-defined, but
+editorial decisions, so each is confirmed individually and `--yes` never
+applies them.
+
+    WB401  vague objective opener            -> the suggested rewrite (Understand -> Explain, ...);
+                                                changes what the objective says
+    WB009  episode file not in config.yaml   -> append it to `episodes:`; publishes a file
+                                                that may be an intentionally unlisted draft
 """
 
 from __future__ import annotations
@@ -26,7 +33,9 @@ import yaml
 from checker.lesson_check import _looks_misplaced, check_episode, rewrite_objective_opener
 from checker.report import Finding
 
-AUTOFIX_CODES = ("WB103", "WB009", "WB213", "WB401")
+SAFE_FIX_CODES = ("WB103", "WB213")
+SUGGESTION_CODES = ("WB401", "WB009")
+AUTOFIX_CODES = SAFE_FIX_CODES + SUGGESTION_CODES
 
 
 # -- changed files ---------------------------------------------------------------
@@ -241,7 +250,9 @@ def _fix_wb009(f: Finding, config: Path, lines: list[str], lesson_dir: Path) -> 
                    validate=_episodes_validator(expected))
 
 
-def plan_autofixes(findings: list[Finding], lesson_dir: Path, codes: tuple[str, ...] = AUTOFIX_CODES) -> list[AutoFix]:
+def plan_autofixes(
+    findings: list[Finding], lesson_dir: Path, codes: tuple[str, ...] = SAFE_FIX_CODES
+) -> list[AutoFix]:
     """Proposed fixes for the findings that have a safe one, bottom-up within
     each file so applying one never shifts another's line."""
     fixes: list[AutoFix] = []

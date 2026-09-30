@@ -11,7 +11,7 @@ import yaml
 from typer.testing import CliRunner
 
 from checker.app import app
-from checker.fix import apply_fix, changed_files, plan_autofixes
+from checker.fix import AUTOFIX_CODES, apply_fix, changed_files, plan_autofixes
 from checker.lesson_check import _check_headings, _code_fence_mask, read_lesson_metadata, run_checks
 
 runner = CliRunner()
@@ -34,7 +34,7 @@ def lesson(tmp_path: Path, body: str = "## A\n", config_tail: str = "episodes:\n
 
 
 def _apply_all(d: Path, code: str) -> None:
-    for fx in plan_autofixes(run_checks(d), d):
+    for fx in plan_autofixes(run_checks(d), d, AUTOFIX_CODES):
         if fx.finding.code == code:
             apply_fix(fx)
 
@@ -69,10 +69,10 @@ def test_wb009_fix_quotes_yaml_special_names(tmp_path):
 def test_wb009_filter_does_not_bypass_reference_safeguard(tmp_path):
     d = lesson(tmp_path)
     (d / "episodes" / "glossary.md").write_text("# Terms\n")
-    runner.invoke(app, ["fix", str(d), "--apply", "--yes", "--code", "WB009"])
+    runner.invoke(app, ["fix", str(d), "--suggest", "--code", "WB009"], input="y\ny\n")
     assert "glossary" not in (d / "config.yaml").read_text()
     (d / ".wbcheck.toml").write_text('[ignore]\ncodes = ["WB013"]\n')
-    runner.invoke(app, ["fix", str(d), "--apply", "--yes"])
+    runner.invoke(app, ["fix", str(d), "--suggest"], input="y\ny\ny\n")
     assert "glossary" not in (d / "config.yaml").read_text()
 
 

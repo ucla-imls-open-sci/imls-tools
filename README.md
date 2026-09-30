@@ -87,7 +87,7 @@ Working on the checker itself? See [Development](#development).
 ```bash
 wbcheck check ~/lessons/my-lesson          # fast checks; saves results; exit 1 on errors
 wbcheck fix ~/lessons/my-lesson            # walk the findings in $EDITOR (nvim: quickfix list)
-wbcheck fix ~/lessons/my-lesson --apply    # apply the safe automatic fixes, each shown as a diff
+wbcheck fix ~/lessons/my-lesson --apply    # apply the safe mechanical fixes, each shown as a diff
 wbcheck review ~/lessons/my-lesson --backend claude   # add the AI review to the same results
 wbcheck tui ~/lessons/my-lesson            # browse, open in $EDITOR at the line, ignore, file issues
 wbcheck issues ~/lessons/my-lesson --preview          # what would be filed as GitHub issues
@@ -158,7 +158,8 @@ on problems you didn't touch. The saved results still hold every finding.
 wbcheck fix LESSON                    # every warning and error, in $VISUAL / $EDITOR
 wbcheck fix LESSON --code WB401       # one rule
 wbcheck fix LESSON --file 'episodes/0*' --changed
-wbcheck fix LESSON --apply            # safe automatic fixes, diff by diff
+wbcheck fix LESSON --apply            # safe mechanical fixes, diff by diff
+wbcheck fix LESSON --suggest          # editorial suggestions, each confirmed on its own
 ```
 
 See [Fixing findings locally](#fixing-findings-locally).
@@ -243,15 +244,26 @@ it shows the code, message, quote, and fix, then `enter` opens the file at
 the line, `s` skips, and `q` stops. After each edit it re-checks and says
 ✔ fixed or ✗ still reported.
 
-**`--apply`** proposes fixes only where the edit is unambiguous, shows each
-as a diff, and asks `y`/`n`/`a`(ll)/`q` (`--yes` applies them all):
+Automatic edits come in two tiers. Both show each change as a diff first.
+
+**`--apply`: safe fixes.** The edit is unambiguous and changes no meaning.
+It asks `y`/`n`/`a`(ll)/`q`, and `--yes` applies them all:
 
 | Code | Fix |
 |---|---|
 | `WB103` | rename a front-matter `exercise:` typo to `exercises:` |
-| `WB009` | append an unlisted episode to `config.yaml`'s `episodes:` (not when `WB013` says the file looks like reference content) |
 | `WB213` | set a heading that skips a level to one below the previous heading |
-| `WB401` | replace a vague objective opener with the suggested verb (Understand → Explain, Know → Identify, ...). Worth reading each one: it's a starting point, and the objective still needs an exercise that assesses it |
+
+**`--suggest`: editorial suggestions.** Well defined, but a decision only you
+can make, so each one asks on its own (default no), and `--yes` never applies
+them:
+
+| Code | Suggestion | Why it's yours to decide |
+|---|---|---|
+| `WB401` | replace a vague objective opener with an observable verb (Understand → Explain, Know → Identify, ...) | it changes what the objective promises; the objective still needs an exercise that assesses it |
+| `WB009` | append an unlisted episode to `config.yaml`'s `episodes:` (never when `WB013` says the file looks like reference content) | Workbench lets you leave drafts unlisted on purpose; listing one publishes it |
+
+Use both with `wbcheck fix LESSON --apply --suggest`.
 
 Each fix edits only the part it's about (a WB401 fix swaps the opening verb
 and keeps the rest of the objective verbatim), checks that the line hasn't
