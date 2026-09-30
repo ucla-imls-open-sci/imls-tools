@@ -3,7 +3,7 @@ authors = ["Tim Dennis <tdennis@library.ucla.edu>"]
 channels = ["conda-forge"]
 name = "carpentries-workbench-checker"
 platforms = ["osx-arm64", "osx-64", "linux-64"]
-version = "0.2.0"
+version = "0.2.1"
 license = "BSD-3-Clause"
 license-file = "LICENSE"
 

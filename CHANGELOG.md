@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (2026-09-30)
 
 ### Changed
 - README reorganized around tasks (check, fix, review, TUI, issues,
