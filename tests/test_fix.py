@@ -283,6 +283,7 @@ def test_tui_open_rechecks_and_reports_fixed(tmp_path, monkeypatch):
         if cmd[0] == "git":
             return real_run(cmd, *args, **kwargs)
         _fix_heading(lesson)
+        return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr("checker.tui.subprocess.run", fake_run)
     seen = {}

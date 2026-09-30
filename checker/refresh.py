@@ -101,12 +101,15 @@ class RefreshNotes:
     messages: list[str] = field(default_factory=list)
 
 
-def _load_existing(path: Path) -> Results | None:
+def _load_existing(path: Path, notes: RefreshNotes) -> Results | None:
+    """The saved results, or None if there are none or they can't be read
+    (then they're rebuilt from scratch, with a note saying so)."""
     if not path.exists():
         return None
     try:
         return load(path)
-    except (ValueError, KeyError):
+    except ValueError as exc:
+        notes.messages.append(f"ignored unreadable saved results and rebuilt them: {exc}")
         return None
 
 
@@ -133,7 +136,7 @@ def refresh(
     hashes = file_hashes(lesson_dir)
     fresh = run_checks(lesson_dir, episode_filter=episode)  # IDs assigned here, once
 
-    old = _load_existing(path)
+    old = _load_existing(path, notes)
     if old is not None and not _same_target(old, target_id, target):
         notes.replaced_target = old.target
         old = None

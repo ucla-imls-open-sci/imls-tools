@@ -10,6 +10,7 @@ to ignore it themselves (the same trick pytest's cache directory uses).
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
@@ -98,14 +99,27 @@ class Results:
 
     @classmethod
     def from_json(cls, text: str) -> Results:
-        """Parse a results file; raises ValueError on an unsupported version."""
-        data = json.loads(text)
+        """Parse a results file. Raises ResultsFormatError (a ValueError)
+        for anything unreadable: bad JSON, the wrong shape, or an
+        unsupported version."""
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ResultsFormatError(f"results file is not valid JSON ({exc.msg}); {RECOVER}") from exc
+        if not isinstance(data, dict):
+            raise ResultsFormatError(f"results file is not a JSON object; {RECOVER}")
         version = data.get("version")
         if version not in READABLE_VERSIONS:
-            raise ValueError(
-                f"results file version {version!r} is not supported (expected {RESULTS_VERSION}); "
-                "re-run `wbcheck check`"
+            raise ResultsFormatError(
+                f"results file version {version!r} is not supported (expected {RESULTS_VERSION}); {RECOVER}"
             )
+        try:
+            return cls._from_dict(data)
+        except (KeyError, TypeError, AttributeError, ValueError) as exc:
+            raise ResultsFormatError(f"results file is damaged ({type(exc).__name__}: {exc}); {RECOVER}") from exc
+
+    @classmethod
+    def _from_dict(cls, data: dict) -> Results:
         git = data.get("git") or {}
         return cls(
             target=data["target"],
@@ -125,6 +139,13 @@ class Results:
         )
 
 
+class ResultsFormatError(ValueError):
+    """A results file that can't be read."""
+
+
+RECOVER = "re-run `wbcheck check` to rebuild it"
+
+
 def save(results: Results, path: Path) -> Path:
     """Write `results` to `path`, creating its directory. Inside a
     `.wbcheck/` directory, also drops a `*` .gitignore so the results never
@@ -136,7 +157,10 @@ def save(results: Results, path: Path) -> Path:
         gitignore = wbcheck_dir / ".gitignore"
         if not gitignore.exists():
             gitignore.write_text("# Created by wbcheck, safe to delete.\n*\n")
-    path.write_text(results.to_json())
+    # Write then rename, so an interrupted save never leaves a half-written file.
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(results.to_json())
+    os.replace(tmp, path)
     return path
 
 

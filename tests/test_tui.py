@@ -244,6 +244,7 @@ def test_tui_open_editor_runs_editor_at_line(tmp_path, monkeypatch):
         if cmd[0] == "git":
             return real_run(cmd, *args, **kwargs)
         calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr("checker.tui.subprocess.run", fake_run)
 
@@ -258,6 +259,35 @@ def test_tui_open_editor_runs_editor_at_line(tmp_path, monkeypatch):
     assert cmd[0] == "nvim" and cmd[-1].startswith(str(lesson / "episodes"))
     assert (cmd[1] == f"+{line}") if line else len(cmd) == 2
 
+
+
+@pytest.mark.parametrize("failure", ["missing", "nonzero"])
+def test_tui_editor_failure_keeps_the_app_running(tmp_path, monkeypatch, failure):
+    _, path = checked_lesson(tmp_path)
+    monkeypatch.setenv("VISUAL", "/does/not/exist" if failure == "missing" else "false")
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if cmd[0] == "git":
+            return real_run(cmd, *args, **kwargs)
+        if failure == "missing":
+            raise FileNotFoundError(2, "No such file or directory", cmd[0])
+        return subprocess.CompletedProcess(cmd, 1)
+
+    monkeypatch.setattr("checker.tui.subprocess.run", fake_run)
+    seen = {}
+
+    async def script(tui, pilot):
+        tui.suspend = contextlib.nullcontext
+        await pilot.press("o")
+        await pilot.pause()
+        seen["running"] = tui.is_running
+        seen["notes"] = [n.message for n in tui._notifications]
+
+    run_app(path, script)
+    assert seen["running"]
+    expected = "Set $VISUAL or $EDITOR" if failure == "missing" else "exited with status 1"
+    assert any(expected in n for n in seen["notes"])
 
 class FakeGh:
     def __init__(self):

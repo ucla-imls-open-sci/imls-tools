@@ -104,6 +104,8 @@ def _refresh(
             tmp.cleanup()
         err.print(f"[red]{exc}[/]")
         raise typer.Exit(2) from exc
+    for message in notes.messages:
+        err.print(f"[yellow]{message}[/]")
     if notes.replaced_target:
         err.print(f"[yellow]replaced saved results for a different lesson[/] ({notes.replaced_target})")
     if notes.stale:
@@ -404,7 +406,11 @@ def issues(
     if not path.exists():
         err.print(f"[red]no results at[/] {path}. Run [bold]wbcheck check {lesson}[/] first.")
         raise typer.Exit(2)
-    results = load(path)
+    try:
+        results = load(path)
+    except ValueError as exc:
+        err.print(f"[red]{exc}[/]")
+        raise typer.Exit(2) from exc
 
     target_repo = repo or repo_from_results(results)
     already: set[str] = set()
