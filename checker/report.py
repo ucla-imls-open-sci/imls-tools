@@ -421,6 +421,7 @@ def render_markdown(
     metadata: LessonMetadata | None = None,
     ai_reviews: dict[str, str] | None = None,
     dirty_files: frozenset[str] = frozenset(),
+    partial: bool = False,
 ) -> str:
     """PR/issue-ready report: a file-level checklist for triage, an Action
     Summary of every shared fix pattern across the whole lesson (so a
@@ -466,8 +467,16 @@ def render_markdown(
             "changes at generation time are shown as plain text instead, since "
             "that commit may not contain what was actually checked."
         )
+    if partial:
+        lines.append(
+            "**Partial results:** only some episodes were checked, so this report doesn't "
+            "cover the whole lesson. Run `wbcheck check` on the lesson for a full report."
+        )
     lines.append("")
-    if not findings:
+    if not findings and partial:
+        lines.append("No findings in the checked scope.")
+        lines.append("")
+    elif not findings:
         lines.append("All checks passed. Nothing to address before opening a PR.")
         lines.append("")
     else:

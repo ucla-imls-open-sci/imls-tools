@@ -148,7 +148,9 @@ def check(
         raise typer.Exit(2)
     results, lesson_dir, tmp, path = _refresh(target, episode, blame, results_path)
     try:
-        shown = _changed_view(results, lesson_dir, since) if (changed or since) else results
+        shown = _episode_view(results, episode) if episode else results
+        if changed or since:
+            shown = _changed_view(shown, lesson_dir, since)
         if not quiet:
             render_results(Console(), shown, show_source=show_source)
         err.print(f"[dim]saved {path}[/]")
@@ -156,6 +158,20 @@ def check(
         if tmp is not None:
             tmp.cleanup()
     raise typer.Exit(1 if _fails(shown, fail_on) else 0)
+
+
+def _episode_view(results: Results, episode: str) -> Results:
+    """A copy of `results` without other episodes' findings. The saved
+    results may keep those (see checker/refresh.py), but `check --episode`
+    shows and fails on the episode it was asked about."""
+    from dataclasses import replace
+
+    checked = f"episodes/{episode}"
+    findings = [
+        f for f in results.findings
+        if not (f.location or "").startswith("episodes/") or f.location == checked
+    ]
+    return replace(results, findings=findings, scope="partial")
 
 
 def _changed_view(results: Results, lesson_dir: Path, since: str | None) -> Results:
@@ -334,6 +350,7 @@ def report(
         metadata=results.metadata,
         ai_reviews=results.ai_reviews or None,
         dirty_files=frozenset(results.dirty_files),
+        partial=results.scope == "partial",
     )
     qmd_title = (
         f"{results.metadata.title} — Lesson Check Report"

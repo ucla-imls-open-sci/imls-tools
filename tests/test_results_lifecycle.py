@@ -222,3 +222,28 @@ def test_commands_write_target_identity(tmp_path, monkeypatch, cmd):
     runner.invoke(app, [cmd[0], str(d), *cmd[1:]])
     saved = load(default_results_path(d))
     assert saved.target_id == str(d.resolve()) and saved.file_hashes
+
+
+# -- #48: invocation scope vs saved scope ----------------------------------------------
+
+
+def test_episode_check_shows_and_fails_on_that_episode_only(tmp_path):
+    d = make_lesson(tmp_path, episodes={"01.md": episode(), "02.md": episode("# Top level\n\ntext\n")})
+    assert runner.invoke(app, ["check", str(d), "-q"]).exit_code == 1  # 02.md has an H1 error
+    result = runner.invoke(app, ["check", str(d), "--episode", "01.md"])
+    assert result.exit_code == 0, result.output
+    assert "02.md" not in result.output
+    saved = load(default_results_path(d))
+    assert any(f.location == "episodes/02.md" for f in saved.findings)  # still saved
+
+
+def test_partial_results_are_labelled_in_reports(tmp_path):
+    d = make_lesson(tmp_path, episodes={"01.md": episode(), "02.md": episode("# Top level\n\ntext\n")})
+    runner.invoke(app, ["check", str(d), "--episode", "01.md", "-q"])  # no full results yet
+    assert load(default_results_path(d)).scope == "partial"
+    terminal = runner.invoke(app, ["report", str(d)]).output
+    assert "Partial results" in terminal and "No issues found" not in terminal
+    md = tmp_path / "r.md"
+    runner.invoke(app, ["report", str(d), "--md", str(md)])
+    text = md.read_text()
+    assert "Partial results" in text and "All checks passed" not in text
