@@ -518,8 +518,17 @@ def fix(
     print_only: Annotated[
         bool, typer.Option("--print", help="Just print quickfix lines (path:line:col: msg), e.g. for `nvim -q`.")
     ] = False,
-    apply: Annotated[bool, typer.Option("--apply", help="Offer the safe automatic fixes, each as a diff.")] = False,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="With --apply, apply every fix without asking.")] = False,
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Offer the safe fixes (WB103, WB213), each as a diff.")
+    ] = False,
+    suggest: Annotated[
+        bool,
+        typer.Option("--suggest", help="Offer editorial suggestions (WB401 rewrites, WB009 episode list), "
+                     "each confirmed individually."),
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="With --apply, apply the safe fixes without asking (never suggestions).")
+    ] = False,
 ) -> None:
     """Work through findings in your editor, or apply the safe automatic fixes.
 
@@ -528,9 +537,11 @@ def fix(
     Other editors open one finding at a time at its line. Either way, the
     lesson is re-checked afterwards and fixed findings are reported.
 
-    --apply offers fixes only where the edit is unambiguous: the `exercise:`
-    front-matter typo (WB103), unlisted episodes (WB009), skipped heading
-    levels (WB213), and the suggested objective rewrite (WB401).
+    --apply offers the safe fixes, where the edit is unambiguous and changes no
+    meaning: the `exercise:` front-matter typo (WB103) and skipped heading
+    levels (WB213). --suggest offers editorial ones, each confirmed on its own
+    even with --yes: the objective rewrite (WB401) and adding an unlisted
+    episode to config.yaml (WB009), which may be a draft left out on purpose.
     """
     import fnmatch
     import os
@@ -578,24 +589,38 @@ def fix(
         return
     console = Console()
 
-    if apply:
-        fixes = plan_autofixes(todo, lesson_dir)
+    if apply or suggest:
+        from checker.fix import SAFE_FIX_CODES, SUGGESTION_CODES
+
+        codes = (SAFE_FIX_CODES if apply else ()) + (SUGGESTION_CODES if suggest else ())
+        fixes = plan_autofixes(todo, lesson_dir, codes)
         if not fixes:
-            err.print(f"None of the {len(todo)} finding(s) has a safe automatic fix; "
-                      "try `wbcheck fix` without --apply.")
+            which = " or ".join(f for f, on in (("safe fix", apply), ("suggestion", suggest)) if on)
+            err.print(f"None of the {len(todo)} finding(s) has a {which}; try `wbcheck fix` without flags.")
             return
+        if yes and suggest:
+            err.print("[dim]--yes applies safe fixes only; each suggestion still asks.[/]")
         from rich.syntax import Syntax
 
         applied = 0
         for n, fx in enumerate(fixes, 1):
-            console.rule(f"[bold]{n}/{len(fixes)}  {fx.finding.code}[/]  {fx.description}", align="left")
+            is_suggestion = fx.finding.code in SUGGESTION_CODES
+            label = "suggestion" if is_suggestion else "fix"
+            console.rule(f"[bold]{n}/{len(fixes)}  {fx.finding.code} {label}[/]  {fx.description}", align="left")
             try:
                 console.print(Syntax(fx.diff(lesson_dir), "diff", theme="ansi_dark"))
             except ValueError as exc:
                 err.print(f"[yellow]skipped:[/] {exc}")
                 continue
-            if not yes:
-                answer = typer.prompt("Apply? [y]es / [n]o / [a]ll / [q]uit", default="y").strip().lower()[:1]
+            if is_suggestion:
+                answer = typer.prompt("Apply this suggestion? [y]es / [n]o / [q]uit", default="n").strip().lower()[:1]
+                if answer == "q":
+                    break
+                if answer != "y":
+                    continue
+            elif not yes:
+                answer = typer.prompt("Apply? [y]es / [n]o / [a]ll safe fixes / [q]uit",
+                                      default="y").strip().lower()[:1]
                 if answer == "q":
                     break
                 if answer == "a":
