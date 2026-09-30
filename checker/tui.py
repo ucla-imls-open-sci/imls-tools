@@ -370,16 +370,32 @@ class FindingsApp(App):
         editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
         with self.suspend():
             subprocess.run(editor_command(editor, path, f.line), check=False)
+        # Back from the editor: re-check so a fixed finding drops off the list.
+        if not self._recheck():
+            return
+        if f.source == "ai":
+            self.notify("Re-checked. AI findings need `wbcheck review` to re-check.")
+        elif self._by_id(f.id) is None:
+            self.notify(f"✔ fixed: {f.code or f.category} {f.location}", timeout=4)
+        else:
+            self.notify(f"✗ still reported: {f.code or f.category}", severity="warning", timeout=4)
 
     def action_rerun(self) -> None:
+        if self._recheck():
+            mechanical = sum(1 for f in self.results.findings if f.source != "ai")
+            self.notify(f"Re-checked: {mechanical} mechanical finding(s)")
+
+    def _recheck(self) -> bool:
+        """Re-run the mechanical checks, keep AI findings, save, and redraw.
+        False (with a notification) if that isn't possible."""
         if self.lesson_dir is None:
             self.notify("Checked from a temporary clone, can't re-run here.", severity="error")
-            return
+            return False
         try:
             rules = load_ignore(self.lesson_dir)
         except ValueError as exc:
             self.notify(str(exc), severity="error")
-            return
+            return False
         mechanical, ignored = rules.apply(run_checks(self.lesson_dir))
         ai = [f for f in self.results.findings if f.source == "ai"]
         self.results.findings = assign_occurrences(mechanical + ai)
@@ -387,7 +403,7 @@ class FindingsApp(App):
         save(self.results, self.results_path)
         self.selected &= {f.id for f in self.results.findings}
         self.refresh_all()
-        self.notify(f"Re-checked: {len(mechanical)} mechanical finding(s)")
+        return True
 
     def action_file_issues(self) -> None:
         repo = issues_mod.repo_from_results(self.results)
