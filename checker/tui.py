@@ -64,18 +64,36 @@ class ConfirmIssues(ModalScreen[bool]):
                border: thick $warning; background: $surface; padding: 1 2; }
     """
 
-    def __init__(self, repo: str, drafts: list[issues_mod.IssueDraft], skipped: int, notes_left: int = 0) -> None:
+    SHOW_ITEMS = 8  # per issue; the rest are summarized
+
+    def __init__(
+        self, repo: str, drafts: list[issues_mod.IssueDraft], skipped: int, notes_left: int = 0,
+        stale: int = 0, hidden: int = 0,
+    ) -> None:
         super().__init__()
         self.repo = repo
         self.drafts = drafts
         self.skipped = skipped
         self.notes_left = notes_left
+        self.stale = stale
+        self.hidden = hidden
 
     def compose(self) -> ComposeResult:
         lines = Text.assemble((f"File {len(self.drafts)} issue(s) in {self.repo}?\n\n", "bold"))
         for d in self.drafts:
             lines.append(f"• {d.title}  ", style="")
             lines.append(f"[{len(d.findings)} item(s); {', '.join(d.labels)}]\n", style="dim")
+            for f in d.findings[: self.SHOW_ITEMS]:
+                where = f"{f.location or 'lesson'}{f':{f.line}' if f.line else ''}"
+                lines.append(f"    {f.code or f.category} {where}  {' '.join(f.message.split())[:70]}\n", style="dim")
+            if len(d.findings) > self.SHOW_ITEMS:
+                lines.append(f"    … and {len(d.findings) - self.SHOW_ITEMS} more\n", style="dim")
+        if self.hidden:
+            lines.append(f"\n{self.hidden} selected finding(s) are hidden by the current filter and included.\n",
+                         style="yellow")
+        if self.stale:
+            lines.append(f"\n{self.stale} stale AI finding(s) left out; re-run `wbcheck review` first.\n",
+                         style="dim")
         if self.skipped:
             lines.append(f"\n{self.skipped} finding(s) skipped, already in a wbcheck issue.\n", style="dim")
         if self.notes_left:
@@ -416,9 +434,9 @@ class FindingsApp(App):
         if self._busy:
             self.notify("Still talking to GitHub, one moment.", severity="warning")
             return
-        selection = self.targets() if self.selected else None
+        selection = [f.id for f in self.targets()] if self.selected else None
         self._set_busy(f"Checking {repo} for already-filed findings…")
-        self._plan_issues(repo, selection, list(self.visible))
+        self._plan_issues(repo, selection)
 
     # gh calls block for a second or more each, so they run in a worker thread
     # and report back through call_from_thread; the table shows a loading
@@ -437,16 +455,27 @@ class FindingsApp(App):
         self.notify(f"gh: {exc}", severity="error", timeout=10)
 
     @work(thread=True, exclusive=True, group="gh")
-    def _plan_issues(self, repo: str, selection: list[Finding] | None, visible: list[Finding]) -> None:
+    def _plan_issues(self, repo: str, selection: list[str] | None) -> None:
         try:
             already = issues_mod.filed_ids(repo)
         except issues_mod.GhError as exc:
             self.call_from_thread(self._gh_failed, exc)
             return
-        notes_left = 0
+        self.call_from_thread(self._confirm_issues, repo, already, selection)
+
+    def _confirm_issues(self, repo: str, already: set[str], selection: list[str] | None) -> None:
+        """Plan against the results as they are now, not as they were when
+        `c` was pressed: anything ignored, re-checked away, or unselected
+        during the gh lookup drops out."""
+        self._set_busy(None)
+        visible = self.visible
+        notes_left = hidden = 0
         if selection is not None:
-            fresh = [f for f in selection if f.id not in already]
-            skipped = len(selection) - len(fresh)
+            current = {f.id: f for f in self.results.findings}
+            picked = [current[i] for i in selection if i in current and i in self.selected]
+            fresh, skipped, stale = issues_mod.eligible(picked, already)
+            visible_ids = {f.id for f in visible}
+            hidden = sum(1 for f in fresh if f.id not in visible_ids)
             drafts = [issues_mod.draft_for_findings(self.results, fresh)] if fresh else []
         else:
             subset = Results(
@@ -457,16 +486,16 @@ class FindingsApp(App):
             # Notes are informational: never file them unless explicitly selected.
             min_sev = "error" if self.min_severity == "error" else "warning"
             drafts, skipped = issues_mod.plan_issues(subset, min_severity=min_sev, already_filed=already)
+            threshold = SEVERITY_ORDER[min_sev]
+            stale = sum(1 for f in visible if f.stale and SEVERITY_ORDER.get(f.severity, 9) <= threshold)
             notes_left = sum(1 for f in visible if f.severity == "info")
-        self.call_from_thread(self._confirm_issues, repo, drafts, skipped, notes_left)
-
-    def _confirm_issues(
-        self, repo: str, drafts: list[issues_mod.IssueDraft], skipped: int, notes_left: int = 0
-    ) -> None:
-        self._set_busy(None)
         if not drafts:
-            notes = f"; {notes_left} note(s) not filed unless selected" if notes_left else ""
-            self.notify(f"Nothing new to file ({skipped} already filed{notes}).")
+            left = [f"{skipped} already filed"]
+            if stale:
+                left.append(f"{stale} stale, re-run `wbcheck review`")
+            if notes_left:
+                left.append(f"{notes_left} note(s) not filed unless selected")
+            self.notify(f"Nothing new to file ({'; '.join(left)}).")
             return
 
         def _answer(confirmed: bool | None) -> None:
@@ -474,7 +503,7 @@ class FindingsApp(App):
                 self._set_busy(f"Filing {len(drafts)} issue(s) in {repo}…")
                 self._create_issues(repo, drafts)
 
-        self.push_screen(ConfirmIssues(repo, drafts, skipped, notes_left), _answer)
+        self.push_screen(ConfirmIssues(repo, drafts, skipped, notes_left, stale=stale, hidden=hidden), _answer)
 
     @work(thread=True, exclusive=True, group="gh")
     def _create_issues(self, repo: str, drafts: list[issues_mod.IssueDraft]) -> None:

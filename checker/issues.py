@@ -173,6 +173,19 @@ def _body(key: str, findings: list[Finding], results: Results) -> str:
     return "\n".join(lines) + "\n"
 
 
+def eligible(findings: list[Finding], already_filed: set[str] | None = None) -> tuple[list[Finding], int, int]:
+    """The findings that may be filed, plus how many were left out as
+    already filed and as stale. The one filing rule, for `wbcheck issues`
+    and for every TUI path, hand-picked selections included: stale AI
+    findings (file changed since the review) may no longer describe the
+    text, so they're never filed; re-review first."""
+    filed = already_filed or set()
+    stale = sum(1 for f in findings if f.stale)
+    current = [f for f in findings if not f.stale]
+    skipped = sum(1 for f in current if f.id in filed)
+    return [f for f in current if f.id not in filed], skipped, stale
+
+
 def plan_issues(
     results: Results,
     group_by: str = "auto",
@@ -186,18 +199,12 @@ def plan_issues(
     if group_by not in ("auto", "file", "rule"):
         raise ValueError(f"unknown group_by `{group_by}`, expected auto, file, or rule")
     threshold = SEVERITY_ORDER[min_severity]
-    filed = already_filed or set()
-    # Stale AI findings (file changed since the review) may no longer
-    # describe the text, so they're never filed; re-review first.
     selected = [
         f
         for f in results.findings
-        if SEVERITY_ORDER.get(f.severity, 9) <= threshold
-        and (source == "all" or f.source == source)
-        and not f.stale
+        if SEVERITY_ORDER.get(f.severity, 9) <= threshold and (source == "all" or f.source == source)
     ]
-    skipped = sum(1 for f in selected if f.id in filed)
-    fresh = [f for f in selected if f.id not in filed]
+    fresh, skipped, _ = eligible(selected, already_filed)
     drafts = []
     for key, findings in _group(fresh, group_by).items():
         labels = [WBCHECK_LABEL] + ([AI_LABEL] if any(f.source == "ai" for f in findings) else [])
