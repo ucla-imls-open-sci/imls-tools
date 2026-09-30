@@ -55,6 +55,49 @@ def ai(results):
     return [f for f in results.findings if f.source == "ai"]
 
 
+# -- #50: damaged results files ---------------------------------------------------------
+
+
+DAMAGED = {
+    "array": "[]",
+    "truncated": '{"version": 2, "target": "x", "findings": [',
+    "missing target": '{"version": 2, "findings": []}',
+    "bad finding": '{"version": 2, "target": "x", "findings": [{"severity": "error"}]}',
+    "findings not a list": '{"version": 2, "target": "x", "findings": 5}',
+}
+
+
+@pytest.mark.parametrize("content", DAMAGED.values(), ids=DAMAGED.keys())
+def test_check_rebuilds_damaged_results(tmp_path, content):
+    d = make_lesson(tmp_path)
+    path = default_results_path(d)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    result = runner.invoke(app, ["check", str(d), "-q"])
+    assert result.exit_code == 0, result.output
+    assert "rebuilt" in result.output
+    assert load(path).target  # readable again
+
+
+@pytest.mark.parametrize("cmd", ["report", "issues"])
+@pytest.mark.parametrize("content", DAMAGED.values(), ids=DAMAGED.keys())
+def test_read_only_commands_explain_damaged_results(tmp_path, content, cmd):
+    d = make_lesson(tmp_path)
+    path = default_results_path(d)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    result = runner.invoke(app, [cmd, str(d)])
+    assert result.exit_code == 2
+    assert "wbcheck check" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_save_leaves_no_temp_file(tmp_path):
+    d = make_lesson(tmp_path)
+    runner.invoke(app, ["check", str(d), "-q"])
+    assert [p.name for p in default_results_path(d).parent.iterdir() if p.name.endswith(".tmp")] == []
+
+
 # -- 7: one merge policy -----------------------------------------------------------
 
 
@@ -194,49 +237,6 @@ def test_reworded_ai_finding_on_same_quote_keeps_its_id(tmp_path, monkeypatch):
                         fake_review(message="This paragraph moves too fast for beginners."))
     runner.invoke(app, ["review", str(d)])
     assert ai(load(default_results_path(d)))[0].id == first
-
-
-# -- #50: damaged results files ---------------------------------------------------------
-
-
-DAMAGED = {
-    "array": "[]",
-    "truncated": '{"version": 2, "target": "x", "findings": [',
-    "missing target": '{"version": 2, "findings": []}',
-    "bad finding": '{"version": 2, "target": "x", "findings": [{"severity": "error"}]}',
-    "findings not a list": '{"version": 2, "target": "x", "findings": 5}',
-}
-
-
-@pytest.mark.parametrize("content", DAMAGED.values(), ids=DAMAGED.keys())
-def test_check_rebuilds_damaged_results(tmp_path, content):
-    d = make_lesson(tmp_path)
-    path = default_results_path(d)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-    result = runner.invoke(app, ["check", str(d), "-q"])
-    assert result.exit_code == 0, result.output
-    assert "rebuilt" in result.output
-    assert load(path).target  # readable again
-
-
-@pytest.mark.parametrize("cmd", ["report", "issues"])
-@pytest.mark.parametrize("content", DAMAGED.values(), ids=DAMAGED.keys())
-def test_read_only_commands_explain_damaged_results(tmp_path, content, cmd):
-    d = make_lesson(tmp_path)
-    path = default_results_path(d)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-    result = runner.invoke(app, [cmd, str(d)])
-    assert result.exit_code == 2
-    assert "wbcheck check" in result.output
-    assert "Traceback" not in result.output
-
-
-def test_save_leaves_no_temp_file(tmp_path):
-    d = make_lesson(tmp_path)
-    runner.invoke(app, ["check", str(d), "-q"])
-    assert [p.name for p in default_results_path(d).parent.iterdir() if p.name.endswith(".tmp")] == []
 
 
 # -- compatibility -------------------------------------------------------------------
