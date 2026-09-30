@@ -203,13 +203,15 @@ pull request's worth of work.
 **Every finding is checked against the text.** A finding whose quote isn't
 in the episode is dropped, and the run reports how many were. Matching
 tolerates whitespace, smart quotes, markdown emphasis, and `...` elisions.
+That proves each finding points at real text, not that its judgment is
+right: treat AI findings as suggestions to verify.
 
 **The rubric is pinned.** Every prompt includes
 [`checker/rubric/`](checker/rubric/): the Carpentries Lab reviewer checklist
 plus excerpts of CLDT and the Workbench docs. Nothing is fetched at review
 time, so the same lesson gets the same rubric every run. The episode and the
-lesson's glossary go in the user message, never the system prompt, so lesson
-text can't carry operator authority. Terms already in the glossary aren't
+lesson's glossary go in the user message, never the system prompt, which
+limits (but can't rule out) lesson text steering the model. Terms already in the glossary aren't
 flagged as gaps, and the mechanical findings are included so the model
 doesn't repeat them.
 
