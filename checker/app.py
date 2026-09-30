@@ -133,21 +133,53 @@ def check(
         str,
         typer.Option(help="Exit 1 if any finding is at least this severe: error, warning, info, or never."),
     ] = "error",
+    changed: Annotated[
+        bool, typer.Option("--changed", help="Only show findings in files with uncommitted changes.")
+    ] = False,
+    since: Annotated[
+        str | None, typer.Option(help="With --changed, also include files changed since this git ref (e.g. main).")
+    ] = None,
 ) -> None:
-    """Run the fast mechanical checks and save the results. Exits 1 on errors (see --fail-on)."""
+    """Run the fast mechanical checks and save the results. Exits 1 on errors (see --fail-on).
+
+    --changed narrows what's shown and what counts toward the exit code; the
+    saved results still hold every finding, for the TUI, reports, and issues.
+    """
     if fail_on not in FAIL_ON:
         err.print(f"[red]--fail-on must be one of {', '.join(FAIL_ON)}[/], got `{fail_on}`")
         raise typer.Exit(2)
     results, lesson_dir, tmp = _run_check(target, episode, blame)
     try:
         path = save(results, _results_path_for(lesson_dir, tmp is not None, results_path))
+        shown = _changed_view(results, lesson_dir, since) if (changed or since) else results
         if not quiet:
-            render_results(Console(), results, show_source=show_source)
+            render_results(Console(), shown, show_source=show_source)
         err.print(f"[dim]saved {path}[/]")
     finally:
         if tmp is not None:
             tmp.cleanup()
-    raise typer.Exit(1 if _fails(results, fail_on) else 0)
+    raise typer.Exit(1 if _fails(shown, fail_on) else 0)
+
+
+def _changed_view(results: Results, lesson_dir: Path, since: str | None) -> Results:
+    """A copy of `results` holding only findings in changed files."""
+    from dataclasses import replace
+
+    from checker.fix import changed_files, only_changed
+
+    try:
+        changed = changed_files(lesson_dir, since)
+    except ValueError as exc:
+        err.print(f"[red]{exc}[/]")
+        raise typer.Exit(2) from exc
+    if changed is None:
+        err.print("[red]--changed needs the lesson to be a git repo[/]")
+        raise typer.Exit(2)
+    kept = only_changed(results.findings, changed)
+    scope = f"changed since {since} or uncommitted" if since else "uncommitted changes"
+    err.print(f"[dim]showing {len(kept)} of {len(results.findings)} finding(s): files with {scope} "
+              f"({len(changed)} file(s))[/]")
+    return replace(results, findings=kept)
 
 
 AI_BACKENDS = ("ollama", "claude")  # mirrors checker.ai_review.BACKENDS, kept here so importing
@@ -476,6 +508,162 @@ def tui(
         err.print(f"[red]{exc}[/]")
         raise typer.Exit(2) from exc
     run(results, path)
+
+
+@app.command()
+def fix(
+    lesson: Annotated[Path, typer.Argument(help="Lesson directory to work through.")] = Path("."),
+    code: Annotated[list[str] | None, typer.Option(help="Only these rule codes (repeatable).")] = None,
+    file: Annotated[str | None, typer.Option(help="Only files matching this glob, e.g. 'episodes/0*'.")] = None,
+    min_severity: Annotated[str, typer.Option(help="Lowest severity to include: error, warning, info.")] = "warning",
+    source: Annotated[str, typer.Option(help="Which findings: all, mechanical, or ai.")] = "all",
+    changed: Annotated[bool, typer.Option("--changed", help="Only files with uncommitted changes.")] = False,
+    since: Annotated[
+        str | None, typer.Option(help="Also files changed since this git ref (implies --changed).")
+    ] = None,
+    step: Annotated[bool, typer.Option("--step", help="One finding at a time, even in vim/nvim.")] = False,
+    print_only: Annotated[
+        bool, typer.Option("--print", help="Just print quickfix lines (path:line:col: msg), e.g. for `nvim -q`.")
+    ] = False,
+    apply: Annotated[bool, typer.Option("--apply", help="Offer the safe automatic fixes, each as a diff.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="With --apply, apply every fix without asking.")] = False,
+) -> None:
+    """Work through findings in your editor, or apply the safe automatic fixes.
+
+    Re-checks the lesson first. In vim/nvim ($VISUAL/$EDITOR), findings load
+    into the quickfix list: `]q`/`:cnext` to move, `:copen` to see them all.
+    Other editors open one finding at a time at its line. Either way, the
+    lesson is re-checked afterwards and fixed findings are reported.
+
+    --apply offers fixes only where the edit is unambiguous: the `exercise:`
+    front-matter typo (WB103), unlisted episodes (WB009), skipped heading
+    levels (WB213), and the suggested objective rewrite (WB401).
+    """
+    import fnmatch
+    import os
+
+    from checker.fix import apply_fix, changed_files, plan_autofixes, quickfix_lines, uses_quickfix
+    from checker.tui import editor_command
+
+    if min_severity not in ("error", "warning", "info") or source not in ("all", "mechanical", "ai"):
+        err.print("[red]--min-severity must be error/warning/info and --source all/mechanical/ai[/]")
+        raise typer.Exit(2)
+    lesson_dir = lesson.expanduser().resolve()
+    if not (lesson_dir / "episodes").is_dir():
+        err.print(f"[red]{lesson_dir} doesn't look like a lesson[/] (no episodes/)")
+        raise typer.Exit(2)
+
+    path = default_results_path(lesson_dir)
+    ai_kept = [f for f in load(path).findings if f.source == "ai"] if path.exists() else []
+    results, _, _ = _run_check(str(lesson_dir), None, blame=False)
+    results.findings = assign_occurrences(results.findings + ai_kept)
+    save(results, path)
+
+    threshold = SEVERITY_ORDER[min_severity]
+    todo = [
+        f for f in results.findings
+        if f.location
+        and SEVERITY_ORDER.get(f.severity, 9) <= threshold
+        and (source == "all" or f.source == source)
+        and (not code or (f.code or f.category) in code)
+        and (not file or fnmatch.fnmatch(f.location, file))
+    ]
+    if changed or since:
+        try:
+            changed_set = changed_files(lesson_dir, since)
+        except ValueError as exc:
+            err.print(f"[red]{exc}[/]")
+            raise typer.Exit(2) from exc
+        if changed_set is None:
+            err.print("[red]--changed needs the lesson to be a git repo[/]")
+            raise typer.Exit(2)
+        todo = [f for f in todo if f.location in changed_set]
+    todo.sort(key=lambda f: (f.location or "", f.line or 0))
+
+    if print_only:
+        for line in quickfix_lines(todo, lesson_dir):
+            print(line)
+        return
+    if not todo:
+        err.print("[green]Nothing to fix[/] with these filters.")
+        return
+    console = Console()
+
+    if apply:
+        fixes = plan_autofixes(todo, lesson_dir)
+        if not fixes:
+            err.print(f"None of the {len(todo)} finding(s) has a safe automatic fix; "
+                      "try `wbcheck fix` without --apply.")
+            return
+        from rich.syntax import Syntax
+
+        applied = 0
+        for n, fx in enumerate(fixes, 1):
+            console.rule(f"[bold]{n}/{len(fixes)}  {fx.finding.code}[/]  {fx.description}", align="left")
+            try:
+                console.print(Syntax(fx.diff(lesson_dir), "diff", theme="ansi_dark"))
+            except ValueError as exc:
+                err.print(f"[yellow]skipped:[/] {exc}")
+                continue
+            if not yes:
+                answer = typer.prompt("Apply? [y]es / [n]o / [a]ll / [q]uit", default="y").strip().lower()[:1]
+                if answer == "q":
+                    break
+                if answer == "a":
+                    yes = True
+                elif answer != "y":
+                    continue
+            try:
+                apply_fix(fx)
+                applied += 1
+            except ValueError as exc:
+                err.print(f"[yellow]skipped:[/] {exc}")
+        err.print(f"[green]Applied {applied} fix(es).[/] Re-checking…")
+        _report_progress(lesson_dir, path, {f.id for f in todo}, ai_kept)
+        return
+
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    before = {f.id for f in todo}
+    if uses_quickfix(editor) and not step:
+        qf = path.parent / "quickfix.txt"
+        qf.write_text("\n".join(quickfix_lines(todo, lesson_dir)) + "\n")
+        err.print(f"[dim]{len(todo)} finding(s) in the quickfix list: ]q or :cnext to move, :copen to list them[/]")
+        subprocess.run([*editor.split(), "-q", str(qf)], check=False)
+        _report_progress(lesson_dir, path, before, ai_kept)
+        return
+
+    for n, f in enumerate(todo, 1):
+        console.rule(f"[bold]{n}/{len(todo)}[/]  {f.location}:{f.line or ''}", align="left")
+        console.print(Text.assemble((f"{f.code or f.category}  ", "bold"), f.message))
+        if f.quote:
+            console.print(Text(f"“{f.quote}”", style="italic"))
+        if f.hint:
+            console.print(Text(f"Fix: {f.hint}", style="dim"))
+        answer = typer.prompt("[enter] open  [s]kip  [q]uit", default="", show_default=False).strip().lower()[:1]
+        if answer == "q":
+            break
+        if answer == "s":
+            continue
+        subprocess.run(editor_command(editor, lesson_dir / f.location, f.line), check=False)
+        still = {x.id for x in run_checks(lesson_dir)}
+        if f.source == "ai":
+            console.print("[dim]AI finding: re-run `wbcheck review` to re-check it[/]")
+        elif f.id in still:
+            console.print("[yellow]✗ still reported[/]")
+        else:
+            console.print("[green]✔ fixed[/]")
+    _report_progress(lesson_dir, path, before, ai_kept)
+
+
+def _report_progress(lesson_dir: Path, results_path: Path, before: set[str], ai_kept: list[Finding]) -> None:
+    """Re-check, save, and say how many of `before` are gone."""
+    results, _, _ = _run_check(str(lesson_dir), None, blame=False)
+    results.findings = assign_occurrences(results.findings + ai_kept)
+    save(results, results_path)
+    now = {f.id for f in results.findings}
+    gone = len(before - now)
+    left = len(before & now)
+    err.print(f"[green]{gone} fixed[/], {left} still reported, {len(results.findings)} finding(s) in the lesson now.")
 
 
 INSTALL_ROOT = Path(__file__).resolve().parent.parent  # the checkout pixi installed from

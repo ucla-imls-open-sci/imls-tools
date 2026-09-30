@@ -8,15 +8,16 @@ lessons. `wbcheck` finds structural problems in under a second: front
 matter, required `:::` blocks, headings, broken links and images, and
 leftover scaffold text. An optional AI review covers writing and pedagogy,
 and every finding it reports quotes the lesson text and is checked against
-it. You can browse findings in a terminal UI, open them in your editor at
-the right line, or file them as pull-request-sized GitHub issues.
+it. Then work through findings in your editor (nvim's quickfix list, or one
+at a time at the right line), let it apply the safe fixes for you, browse
+them in a terminal UI, or file them as pull-request-sized GitHub issues.
 
 Run it before you push, instead of waiting on the sandpaper CI build.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ucla-imls-open-sci/carpentries-workbench-checker/main/install.sh | sh
 wbcheck check path/to/lesson
-wbcheck tui path/to/lesson
+wbcheck fix path/to/lesson
 ```
 
 ## Contents
@@ -24,6 +25,7 @@ wbcheck tui path/to/lesson
 - [Install](#install)
 - [Quick tour](#quick-tour)
 - [Commands](#commands)
+- [Fixing findings locally](#fixing-findings-locally)
 - [What it checks](#what-it-checks)
 - [Ignoring findings](#ignoring-findings-wbchecktoml)
 - [The AI review](#the-ai-review)
@@ -84,6 +86,8 @@ Working on the checker itself? See [Development](#development).
 
 ```bash
 wbcheck check ~/lessons/my-lesson          # fast checks; saves results; exit 1 on errors
+wbcheck fix ~/lessons/my-lesson            # walk the findings in $EDITOR (nvim: quickfix list)
+wbcheck fix ~/lessons/my-lesson --apply    # apply the safe automatic fixes, each shown as a diff
 wbcheck review ~/lessons/my-lesson --backend claude   # add the AI review to the same results
 wbcheck tui ~/lessons/my-lesson            # browse, open in $EDITOR at the line, ignore, file issues
 wbcheck issues ~/lessons/my-lesson --preview          # what would be filed as GitHub issues
@@ -113,13 +117,30 @@ wbcheck check LESSON --source                  # show the offending source line 
 wbcheck check LESSON --blame                   # record who last changed each file with findings
 wbcheck check LESSON --fail-on warning         # exit 1 on warnings too; also info or never
 wbcheck check LESSON --quiet                   # save results without printing
+wbcheck check LESSON --changed                 # only files with uncommitted changes
+wbcheck check LESSON --changed --since main    # ...plus everything changed since main
 ```
 
 Prints findings grouped by file. Each shows its rule code (a clickable link
 to the guide section in terminals that support hyperlinks: iTerm2, Ghostty,
 WezTerm, VS Code, recent GNOME Terminal), line number, message, and fix.
 Exits `1` if anything is at or above `--fail-on` (default `error`), so it
-works in a pre-commit hook or a lesson's own CI.
+works in a pre-commit hook or a lesson's own CI. With `--changed`, only
+findings in changed files are shown and counted toward the exit code, which
+makes `wbcheck check . --changed --since main --fail-on warning` a good
+pre-push or PR check: it holds your changes to the standard without failing
+on problems you didn't touch. The saved results still hold every finding.
+
+### `fix`: work through findings in your editor
+
+```bash
+wbcheck fix LESSON                    # every warning and error, in $VISUAL / $EDITOR
+wbcheck fix LESSON --code WB401       # one rule
+wbcheck fix LESSON --file 'episodes/0*' --changed
+wbcheck fix LESSON --apply            # safe automatic fixes, diff by diff
+```
+
+See [Fixing findings locally](#fixing-findings-locally).
 
 ### `review`: the AI review
 
@@ -148,8 +169,8 @@ source lines around the finding.
 |---|---|
 | `enter` (tree) | filter to that file or rule code |
 | `space` | select or unselect a finding (moves down) |
-| `o` | open the file at the finding's line in `$VISUAL` / `$EDITOR` (vim, nvim, emacs, nano, VS Code, Cursor, Sublime, Zed, Helix) |
-| `r` | re-run the mechanical checks after editing, keeping AI findings |
+| `o` | open the file at the finding's line in `$VISUAL` / `$EDITOR` (vim, nvim, emacs, nano, VS Code, Cursor, Sublime, Zed, Helix). When you come back, it re-checks and tells you whether that finding is fixed; fixed ones drop off the list |
+| `r` | re-run the mechanical checks, keeping AI findings |
 | `i` | ignore the selection (or the current finding): adds its ID to `.wbcheck.toml` |
 | `c` | file issues: the selection as **one** issue, or, with nothing selected, the visible warnings and errors grouped as `wbcheck issues` would. Shows the list and asks `y`/`n`, skips anything already filed, and shows progress while it talks to GitHub |
 | `s` / `a` | cycle minimum severity (all → warnings+ → errors) / source (all → mechanical → AI) |
@@ -179,6 +200,41 @@ wbcheck report LESSON --pdf report.pdf             # needs Quarto + LaTeX
 `wbcheck doctor` shows the version, install location, and which optional
 tools are ready. `wbcheck update` pulls the latest checker and refreshes its
 environment; it refuses if the install has local changes.
+
+## Fixing findings locally
+
+`wbcheck fix` re-checks the lesson, then walks you through what it found.
+Filter with `--code` (repeatable), `--file GLOB`, `--min-severity`
+(default `warning`), `--source mechanical|ai`, and `--changed` /
+`--since REF`.
+
+**In vim or nvim** (`$VISUAL` or `$EDITOR`), every finding loads into the
+**quickfix list**: the editor opens on the first one, `]q` / `:cnext` and
+`[q` / `:cprev` move between them, and `:copen` shows them all with their
+messages and fixes. When you quit, the lesson is re-checked and you get a
+count of what you fixed. To load findings into an editor that's already
+open, `wbcheck fix LESSON --print` writes the same `path:line:col: message`
+lines to stdout: `:cexpr system('wbcheck fix . --print')`, or start one with
+`nvim -q <(wbcheck fix . --print)`.
+
+**In any other editor** (or with `--step`), it goes one finding at a time:
+it shows the code, message, quote, and fix, then `enter` opens the file at
+the line, `s` skips, and `q` stops. After each edit it re-checks and says
+✔ fixed or ✗ still reported.
+
+**`--apply`** proposes fixes only where the edit is unambiguous, shows each
+as a diff, and asks `y`/`n`/`a`(ll)/`q` (`--yes` applies them all):
+
+| Code | Fix |
+|---|---|
+| `WB103` | rename a front-matter `exercise:` typo to `exercises:` |
+| `WB009` | append an unlisted episode to `config.yaml`'s `episodes:` (not when `WB013` says the file looks like reference content) |
+| `WB213` | set a heading that skips a level to one below the previous heading |
+| `WB401` | replace a vague objective opener with the suggested verb (Understand → Explain, Know → Identify, ...). Worth reading each one: it's a starting point, and the objective still needs an exercise that assesses it |
+
+Each fix checks that the line hasn't changed since the check ran, and
+content (prose, placeholders, exercises) is always left to you. Review the
+result with `git diff` like any other edit.
 
 ## What it checks
 

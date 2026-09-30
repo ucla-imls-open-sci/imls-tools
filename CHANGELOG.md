@@ -22,6 +22,15 @@ issue filing. Tracked in #21 to #28; the design is in
 - **`.wbcheck.toml`** to ignore findings by code, path glob, or ID.
 - **WB213**: headings that skip a level (h2 to h4), per the Carpentries Lab
   editor checklist.
+- **`wbcheck fix`**: work through findings in your editor. In vim/nvim they
+  load into the quickfix list; other editors go one finding at a time. Both
+  re-check afterwards and report what was fixed. `--apply` offers safe
+  automatic fixes (WB103, WB009, WB213, WB401) as diffs; `--print` emits
+  quickfix lines.
+- **`check --changed [--since REF]`**: only show and count findings in files
+  you've changed.
+- The TUI re-checks when you come back from the editor (`o`) and says
+  whether that finding is fixed.
 - **One-line install** with pixi (`install.sh`), plus `wbcheck doctor` and
   `wbcheck update`. CI installs with the script on Linux and macOS and runs
   the installed command.
