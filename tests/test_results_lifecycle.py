@@ -196,34 +196,6 @@ def test_reworded_ai_finding_on_same_quote_keeps_its_id(tmp_path, monkeypatch):
     assert ai(load(default_results_path(d)))[0].id == first
 
 
-# -- compatibility -------------------------------------------------------------------
-
-
-def test_version_1_results_files_still_load(tmp_path):
-    d = make_lesson(tmp_path)
-    runner.invoke(app, ["check", str(d), "-q"])
-    path = default_results_path(d)
-    data = json.loads(path.read_text())
-    data["version"] = 1
-    for key in ("target_id", "revision", "scope", "file_hashes"):
-        data.pop(key)
-    path.write_text(json.dumps(data))
-    old = load(path)
-    assert old.scope == "full" and old.target_id is None
-    result = runner.invoke(app, ["check", str(d), "-q"])
-    assert result.exception is None or isinstance(result.exception, SystemExit)
-    assert load(path).target_id == str(d.resolve())
-
-
-@pytest.mark.parametrize("cmd", [["check", "-q"], ["tui"]])
-def test_commands_write_target_identity(tmp_path, monkeypatch, cmd):
-    d = make_lesson(tmp_path)
-    monkeypatch.setattr("checker.tui.run", lambda results, path: None)
-    runner.invoke(app, [cmd[0], str(d), *cmd[1:]])
-    saved = load(default_results_path(d))
-    assert saved.target_id == str(d.resolve()) and saved.file_hashes
-
-
 # -- #49: AI IDs survive ignoring a sibling ------------------------------------------------
 
 
@@ -266,3 +238,31 @@ def test_colliding_saved_ai_ids_are_renumbered():
     assert same[0].id == same[1].id
     kept = _keep_ai_ids(same)
     assert len({f.id for f in kept}) == 2
+
+
+# -- compatibility -------------------------------------------------------------------
+
+
+def test_version_1_results_files_still_load(tmp_path):
+    d = make_lesson(tmp_path)
+    runner.invoke(app, ["check", str(d), "-q"])
+    path = default_results_path(d)
+    data = json.loads(path.read_text())
+    data["version"] = 1
+    for key in ("target_id", "revision", "scope", "file_hashes"):
+        data.pop(key)
+    path.write_text(json.dumps(data))
+    old = load(path)
+    assert old.scope == "full" and old.target_id is None
+    result = runner.invoke(app, ["check", str(d), "-q"])
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert load(path).target_id == str(d.resolve())
+
+
+@pytest.mark.parametrize("cmd", [["check", "-q"], ["tui"]])
+def test_commands_write_target_identity(tmp_path, monkeypatch, cmd):
+    d = make_lesson(tmp_path)
+    monkeypatch.setattr("checker.tui.run", lambda results, path: None)
+    runner.invoke(app, [cmd[0], str(d), *cmd[1:]])
+    saved = load(default_results_path(d))
+    assert saved.target_id == str(d.resolve()) and saved.file_hashes
