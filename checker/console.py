@@ -59,6 +59,9 @@ def _source_excerpt(lesson_dir: Path | None, f: Finding, context: int = 1) -> Sy
     )
 
 
+PARTIAL_NOTE = "Partial results: only some episodes were checked. Run `wbcheck check` for the whole lesson."
+
+
 def render_header(console: Console, results: Results) -> None:
     """Title, lesson identity, and severity counts."""
     console.print(Text(results.title, style="bold"))
@@ -76,12 +79,15 @@ def render_header(console: Console, results: Results) -> None:
     if results.ignored:
         summary.append(f" · {results.ignored} ignored via .wbcheck.toml", style="dim")
     console.print(summary)
+    if results.scope == "partial":
+        console.print(Text(PARTIAL_NOTE, style="yellow"))
 
 
 def render_findings(console: Console, results: Results, show_source: bool = False) -> None:
     """Every finding, grouped by file in severity/line order."""
     if not results.findings:
-        console.print(Text("✔ No issues found", style="bold green"))
+        clean = "✔ No findings in the checked scope" if results.scope == "partial" else "✔ No issues found"
+        console.print(Text(clean, style="bold green"))
         return
     lesson_dir = Path(results.lesson_dir) if results.lesson_dir else None
     by_location: dict[str, list[Finding]] = {}

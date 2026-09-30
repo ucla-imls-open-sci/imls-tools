@@ -227,7 +227,8 @@ class FindingsApp(App):
         if self.search_text:
             filters.append(f"/{self.search_text}")
         sel = f" · {len(self.selected)} selected" if self.selected else ""
-        self.sub_title = f"{len(self.visible)}/{len(self.results.findings)} shown · {' '.join(filters)}{sel}"
+        partial = " · PARTIAL: some episodes not checked" if self.results.scope == "partial" else ""
+        self.sub_title = f"{len(self.visible)}/{len(self.results.findings)} shown · {' '.join(filters)}{sel}{partial}"
 
     def _build_tree(self) -> None:
         tree = self.query_one("#sidebar", Tree)
