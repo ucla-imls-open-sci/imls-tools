@@ -13,8 +13,9 @@ Grouping:
 Every finding's stable ID (see Finding.id) is embedded in the issue body as
 an HTML comment, `<!-- wbcheck:id=... -->`. Before filing, existing issues
 labelled `wbcheck` (open or closed) are scanned for those markers and any
-finding already filed is left out, so re-running never duplicates an issue,
-and a finding closed as won't-fix stays closed.
+finding already filed is left out, so re-running doesn't file it again, and
+a finding closed as won't-fix stays closed. This relies on the ID staying
+the same (see Finding.id) and on the marker and label being left in place.
 """
 
 from __future__ import annotations
@@ -238,15 +239,25 @@ def _gh(args: list[str], input_text: str | None = None) -> str:
     return result.stdout
 
 
+ISSUE_SCAN_LIMIT = 10_000
+
+
 def filed_ids(repo: str) -> set[str]:
     """Finding IDs already present in any `wbcheck`-labelled issue in `repo`,
-    open or closed."""
+    open or closed. Raises GhError rather than return a partial set if the
+    repo has more wbcheck issues than we read, since a partial set would
+    let already-filed findings be filed again."""
     out = _gh([
         "issue", "list", "--repo", repo, "--label", WBCHECK_LABEL, "--state", "all",
-        "--limit", "1000", "--json", "body",
+        "--limit", str(ISSUE_SCAN_LIMIT), "--json", "body",
     ])
+    issues = json.loads(out or "[]")
+    if len(issues) >= ISSUE_SCAN_LIMIT:
+        raise GhError(
+            f"{repo} has {ISSUE_SCAN_LIMIT}+ wbcheck issues; can't check them all for duplicates"
+        )
     ids: set[str] = set()
-    for issue in json.loads(out or "[]"):
+    for issue in issues:
         ids.update(ID_MARKER_RE.findall(issue.get("body") or ""))
     return ids
 

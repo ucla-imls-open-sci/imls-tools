@@ -18,6 +18,7 @@ from checker.ai_review import (
     AREA_CODES,
     EpisodeReview,
     ReviewFinding,
+    build_glossary_block,
     build_system_prompt,
     build_user_prompt,
     format_review_text,
@@ -62,24 +63,26 @@ def _finding(**overrides) -> ReviewFinding:
 # -- prompts -------------------------------------------------------------------
 
 
-def test_system_prompt_pins_rubric_and_glossary():
-    prompt = build_system_prompt("Branch\n: A movable pointer to a commit.")
-    assert "Reviewer Checklist" in prompt or "reviewer checklist" in prompt.lower()
+def test_system_prompt_pins_rubric_but_no_lesson_content():
+    prompt = build_system_prompt()
+    assert "reviewer checklist" in prompt.lower()
     assert "SMART" in prompt  # CLDT excerpt
-    assert "<lesson_glossary>\nBranch" in prompt
+    # lesson text never gets system-prompt authority
+    assert "<lesson_glossary>" not in prompt and "<episode_text>" not in prompt
 
 
-def test_system_prompt_without_glossary_says_so():
-    assert "no glossary written yet" in build_system_prompt("")
+def test_glossary_block_carries_glossary_or_says_there_is_none():
+    assert build_glossary_block("Branch\n: A pointer.") == "<lesson_glossary>\nBranch\n: A pointer.\n</lesson_glossary>"
+    assert "no glossary written yet" in build_glossary_block("")
 
 
 def test_system_prompt_treats_lesson_text_as_data():
     assert "not instructions to you" in build_system_prompt()
 
 
-def test_system_prompt_is_identical_across_episodes():
-    # Caching depends on the system prompt not varying per episode.
-    assert build_system_prompt("g") == build_system_prompt("g")
+def test_system_prompt_is_identical_across_lessons():
+    # Caching depends on the system prompt never varying.
+    assert build_system_prompt() == build_system_prompt()
 
 
 def test_user_prompt_lists_mechanical_findings_and_wraps_episode():
@@ -179,7 +182,10 @@ def test_claude_backend_sends_cached_system_schema_effort_and_fallbacks(monkeypa
     assert captured["output_config"] == {"effort": "xhigh"}
     assert captured["fallbacks"] == "default"
     assert captured["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert "<episode_text>" in captured["messages"][0]["content"]
+    glossary_part, episode_part = captured["messages"][0]["content"]
+    assert glossary_part["text"] == "<lesson_glossary>\nG\n</lesson_glossary>"
+    assert glossary_part["cache_control"] == {"type": "ephemeral"}
+    assert "<episode_text>" in episode_part["text"]
     assert [f.code for f in result.findings] == ["AI205"]
 
 
@@ -198,12 +204,16 @@ def test_claude_backend_raises_clear_errors(monkeypatch, response, message):
 
 
 def _install_fake_ollama(monkeypatch, contents, calls):
-    def chat(model, messages, format, options):
-        calls.append({"model": model, "messages": list(messages), "format": format})
-        content = contents[len(calls) - 1]
-        return types.SimpleNamespace(message=types.SimpleNamespace(content=content))
+    class Client:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
 
-    monkeypatch.setitem(sys.modules, "ollama", types.SimpleNamespace(chat=chat))
+        def chat(self, model, messages, format, options):
+            calls.append({"model": model, "messages": list(messages), "format": format, "timeout": self.timeout})
+            content = contents[len(calls) - 1]
+            return types.SimpleNamespace(message=types.SimpleNamespace(content=content))
+
+    monkeypatch.setitem(sys.modules, "ollama", types.SimpleNamespace(Client=Client))
 
 
 def test_ollama_backend_constrains_to_schema(monkeypatch):
@@ -213,6 +223,7 @@ def test_ollama_backend_constrains_to_schema(monkeypatch):
     result = review_episode(EPISODE, "e.md", [], "ollama")
     assert calls[0]["model"] == ai_review.DEFAULT_MODELS["ollama"]
     assert calls[0]["format"] == EpisodeReview.model_json_schema()
+    assert calls[0]["timeout"] == ai_review.OLLAMA_TIMEOUT_SECONDS  # never an unbounded wait
     assert len(result.findings) == 1
 
 
@@ -252,3 +263,9 @@ def test_reports_show_the_verified_quote():
     console = Console(record=True, width=120)
     render_findings(console, Results(target="x", lesson_dir=None, findings=result.findings))
     assert "Simply run `git branch` and you're done." in console.export_text()
+
+
+def test_locate_quote_survives_expanding_case_folds():
+    # ß casefolds to "ss": the position map must grow with it
+    assert locate_quote("abcdefgh", "ß" * 20 + "\nabcdefgh") == 2
+    assert locate_quote("Straße ist hier lang", "one\ntwo Straße ist hier lang") == 2

@@ -225,7 +225,8 @@ def test_review_failure_keeps_earlier_ai_findings(tmp_path, monkeypatch):
 
     monkeypatch.setattr("checker.ai_review.review_episode", boom)
     result = runner.invoke(app, ["review", str(lesson_dir)])
-    assert result.exit_code == 0
+    assert result.exit_code == 1  # the requested review didn't complete
+    assert "1 of 1 episode review(s) failed" in result.output
     saved = load(default_results_path(lesson_dir))
     assert saved.ai_reviews["01.md (ollama)"].startswith("(AI review failed: ollama not running")
     assert [f.quote for f in saved.findings if f.source == "ai"] == ["kept"]
@@ -239,3 +240,11 @@ def test_review_rejects_unknown_effort(tmp_path):
 def test_review_rejects_unknown_backend(tmp_path):
     result = runner.invoke(app, ["review", str(make_lesson(tmp_path)), "--backend", "codex"])
     assert result.exit_code == 2
+
+
+def test_review_unmatched_episode_is_an_error(tmp_path, monkeypatch):
+    lesson_dir = make_lesson(tmp_path)
+    monkeypatch.setattr("checker.ai_review.review_episode", lambda *a, **k: _fake_result(a[1]))
+    result = runner.invoke(app, ["review", str(lesson_dir), "--episode", "nope.md"])
+    assert result.exit_code == 2
+    assert "no episode named" in result.output

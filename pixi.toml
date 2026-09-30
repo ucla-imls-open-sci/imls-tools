@@ -24,6 +24,9 @@ lint = "ruff check checker tests"
 lint-fix = "ruff check checker tests --fix"
 format = "ruff format checker tests"
 
+# Build the wheel and check every tracked file under checker/ is in it.
+check-wheel = "python scripts/check_wheel.py"
+
 # Re-fetch the guidance excerpts the AI review pins into its prompt
 # (checker/rubric/*.md). Review the diff before committing.
 refresh-rubric = "python scripts/refresh_rubric.py"
@@ -44,6 +47,7 @@ ruff = ">=0.14.0,<0.15"
 rich = ">=15.0.0,<16"
 typer = ">=0.27.2,<0.28"
 textual = ">=8.2.8,<9"
+hatchling = ">=1.32.4,<2"
 
 [pypi-dependencies]
 anthropic = ">=0.125.0, <0.126"

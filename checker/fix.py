@@ -17,9 +17,13 @@ from __future__ import annotations
 import difflib
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
+from checker.lesson_check import _looks_misplaced, check_episode, rewrite_objective_opener
 from checker.report import Finding
 
 AUTOFIX_CODES = ("WB103", "WB009", "WB213", "WB401")
@@ -33,8 +37,10 @@ def changed_files(lesson_dir: Path, since: str | None = None) -> set[str] | None
     or untracked), plus, with `since`, everything that differs from that git
     ref. None if the lesson isn't a git repo or git fails."""
     try:
+        # -z: NUL-separated records with paths verbatim; without it git
+        # quotes paths containing spaces or non-ASCII ("episodes/a b.md").
         status = subprocess.run(
-            ["git", "status", "--porcelain", "--no-renames", "--untracked-files=all"],
+            ["git", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"],
             cwd=lesson_dir, capture_output=True, text=True, timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -45,13 +51,13 @@ def changed_files(lesson_dir: Path, since: str | None = None) -> set[str] | None
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=lesson_dir,
                          capture_output=True, text=True, timeout=10).stdout.strip()
     root = Path(top) if top else lesson_dir
-    paths = {line[3:] for line in status.stdout.splitlines() if len(line) > 3}
+    paths = {record[3:] for record in status.stdout.split("\0") if len(record) > 3}
     if since:
-        diff = subprocess.run(["git", "diff", "--name-only", f"{since}...HEAD"], cwd=lesson_dir,
+        diff = subprocess.run(["git", "diff", "--name-only", "-z", f"{since}...HEAD"], cwd=lesson_dir,
                               capture_output=True, text=True, timeout=10)
         if diff.returncode != 0:
             raise ValueError(f"git can't compare against `{since}`: {diff.stderr.strip()}")
-        paths |= set(diff.stdout.split())
+        paths |= {p for p in diff.stdout.split("\0") if p}
     out = set()
     for p in paths:
         try:
@@ -112,6 +118,9 @@ class AutoFix:
     finding: Finding
     description: str
     edit: Edit
+    # Raises ValueError if the edited file text is wrong (e.g. config.yaml
+    # no longer parses, or lost an episode). Run before anything is written.
+    validate: Callable[[str], None] | None = None
 
     def diff(self, root: Path) -> str:
         """Unified diff of this fix alone against the file as it is now."""
@@ -126,14 +135,20 @@ def _applied(lines: list[str], edit: Edit) -> list[str]:
         raise ValueError(f"{edit.path.name}:{edit.index + 1} changed since the check; re-run `wbcheck check`")
     newline = "\n" if lines[edit.index].endswith("\n") else ""
     if edit.insert:
-        return lines[: edit.index + 1] + [edit.new + "\n"] + lines[edit.index + 1 :]
+        # a last line without a newline needs one before anything goes after it
+        anchor = lines[edit.index] if newline else lines[edit.index] + "\n"
+        return lines[: edit.index] + [anchor, edit.new + "\n"] + lines[edit.index + 1 :]
     return lines[: edit.index] + [edit.new + newline] + lines[edit.index + 1 :]
 
 
 def apply_fix(fix: AutoFix) -> None:
-    """Write `fix` to disk (after re-checking the line is unchanged)."""
+    """Write `fix` to disk, after re-checking the line is unchanged and
+    running its validator on the result."""
     lines = fix.edit.path.read_text().splitlines(keepends=True)
-    fix.edit.path.write_text("".join(_applied(lines, fix.edit)))
+    new_text = "".join(_applied(lines, fix.edit))
+    if fix.validate is not None:
+        fix.validate(new_text)
+    fix.edit.path.write_text(new_text)
 
 
 _HEADING_RE = re.compile(r"^(#{1,6})(\s+.*)$")
@@ -166,27 +181,48 @@ def _fix_wb213(f: Finding, path: Path, lines: list[str]) -> AutoFix | None:
 
 
 def _fix_wb401(f: Finding, path: Path, lines: list[str]) -> AutoFix | None:
-    suggestion = re.search(r'Try "([^"]+)"', f.hint or "")
-    if f.line is None or not suggestion:
+    if f.line is None:
         return None
     old = lines[f.line - 1]
-    bullet = re.match(r"^(\s*[-*+]\s+)(.*?)(\.?)\s*$", old)
+    bullet = re.match(r"^(\s*(?:[-*+]|\d+[.)])\s+)(.*)$", old)
     if not bullet:
         return None
+    rewritten = rewrite_objective_opener(bullet.group(2))
+    if rewritten is None:
+        return None
     return AutoFix(f, "use the suggested observable verb (check it still says what you mean)",
-                   Edit(path, f.line - 1, old, bullet.group(1) + suggestion.group(1) + bullet.group(3)))
+                   Edit(path, f.line - 1, old, bullet.group(1) + rewritten))
 
 
 _UNLISTED_RE = re.compile(r"^episodes/(\S+) exists but is not listed")
 
 
-def _fix_wb009(f: Finding, config: Path, lines: list[str], misplaced: set[str]) -> AutoFix | None:
+def _looks_like_reference(lesson_dir: Path, name: str) -> bool:
+    """WB013's test, run on the file itself, so the safeguard holds even
+    when WB013 was filtered out (--code) or ignored in .wbcheck.toml."""
+    path = lesson_dir / "episodes" / name
+    return path.is_file() and _looks_misplaced(check_episode(path, lesson_dir))
+
+
+def _episodes_validator(expected: list[str]) -> Callable[[str], None]:
+    def validate(text: str) -> None:
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"config.yaml would no longer parse: {exc}") from exc
+        episodes = data.get("episodes") if isinstance(data, dict) else None
+        if not isinstance(episodes, list) or episodes[: len(expected)] != expected:
+            raise ValueError("config.yaml `episodes:` wouldn't come out as expected; not changed")
+    return validate
+
+
+def _fix_wb009(f: Finding, config: Path, lines: list[str], lesson_dir: Path) -> AutoFix | None:
     name = _UNLISTED_RE.match(f.message)
-    if not name or f"episodes/{name.group(1)}" in misplaced:
-        return None  # WB013 says it's probably not an episode at all
+    if not name or _looks_like_reference(lesson_dir, name.group(1)):
+        return None  # WB013: probably reference content, not an unwritten episode
     start = next((i for i, line in enumerate(lines) if re.match(r"^episodes:\s*$", line)), None)
     if start is None:
-        return None
+        return None  # flow style (`episodes: [a, b]`) or missing: leave it to the author
     last = start
     for i in range(start + 1, len(lines)):
         if re.match(r"^\s*-\s+\S", lines[i]):
@@ -195,14 +231,19 @@ def _fix_wb009(f: Finding, config: Path, lines: list[str], misplaced: set[str]) 
             break
     item = re.match(r"^(\s*)-", lines[last]) if last != start else None
     indent = item.group(1) if item else ""
+    # YAML-quote names that need it ([draft].md, a: b.md, ...)
+    scalar = yaml.safe_dump([name.group(1)], default_flow_style=False).strip()[2:]
+    current = yaml.safe_load("\n".join(lines))
+    listed = current.get("episodes") if isinstance(current, dict) else None
+    expected = [*(listed if isinstance(listed, list) else []), name.group(1)]
     return AutoFix(f, f"add {name.group(1)} to the end of config.yaml `episodes:`",
-                   Edit(config, last, lines[last], f"{indent}- {name.group(1)}", insert=True))
+                   Edit(config, last, lines[last], f"{indent}- {scalar}", insert=True),
+                   validate=_episodes_validator(expected))
 
 
 def plan_autofixes(findings: list[Finding], lesson_dir: Path, codes: tuple[str, ...] = AUTOFIX_CODES) -> list[AutoFix]:
     """Proposed fixes for the findings that have a safe one, bottom-up within
     each file so applying one never shifts another's line."""
-    misplaced = {f.location for f in findings if f.code == "WB013" and f.location}
     fixes: list[AutoFix] = []
     for f in findings:
         if f.code not in codes or not f.location:
@@ -220,7 +261,7 @@ def plan_autofixes(findings: list[Finding], lesson_dir: Path, codes: tuple[str, 
             "WB103": lambda: _fix_wb103(f, path, lines),
             "WB213": lambda: _fix_wb213(f, path, lines),
             "WB401": lambda: _fix_wb401(f, path, lines),
-            "WB009": lambda: _fix_wb009(f, path, lines, misplaced),
+            "WB009": lambda: _fix_wb009(f, path, lines, lesson_dir),
         }[f.code]()
         if fix is not None:
             fixes.append(fix)

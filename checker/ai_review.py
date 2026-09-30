@@ -156,14 +156,19 @@ as literal lesson content.
 """
 
 
-def build_system_prompt(glossary_text: str = "") -> str:
-    """Instructions, pinned rubric, and the lesson glossary. Identical for
-    every episode of a lesson, so it caches across the episode loop."""
+def build_system_prompt() -> str:
+    """Instructions and the pinned rubric: only text this tool controls.
+    Lesson content (glossary, episode) never goes in the system prompt,
+    where it would carry operator authority. Identical for every episode
+    and every lesson, so it caches."""
+    return f"{INSTRUCTIONS}\n\n<rubric>\n{load_rubric()}\n</rubric>"
+
+
+def build_glossary_block(glossary_text: str = "") -> str:
+    """The lesson glossary, as the first (lesson-stable, cacheable) part of
+    the user message."""
     glossary = glossary_text.strip() or "(no glossary written yet, or still the scaffold placeholder)"
-    return (
-        f"{INSTRUCTIONS}\n\n<rubric>\n{load_rubric()}\n</rubric>\n\n"
-        f"<lesson_glossary>\n{glossary}\n</lesson_glossary>"
-    )
+    return f"<lesson_glossary>\n{glossary}\n</lesson_glossary>"
 
 
 def build_user_prompt(episode_text: str, mechanical: list[Finding]) -> str:
@@ -202,8 +207,10 @@ def _normalize_with_map(text: str) -> tuple[str, list[int]]:
             prev_space = True
         else:
             prev_space = False
-        out.append(ch.casefold())
-        index.append(i)
+        # casefold can emit more than one char (ß -> ss): map each back to i
+        folded = ch.casefold()
+        out.append(folded)
+        index.extend([i] * len(folded))
     return "".join(out), index
 
 
@@ -260,7 +267,7 @@ def to_findings(review: EpisodeReview, episode_text: str, location: str) -> Revi
 # -- backends ------------------------------------------------------------------
 
 
-def _review_with_claude(system: str, user: str, model: str, effort: str) -> EpisodeReview:
+def _review_with_claude(system: str, glossary: str, user: str, model: str, effort: str) -> EpisodeReview:
     import anthropic
 
     client = anthropic.Anthropic()
@@ -270,7 +277,14 @@ def _review_with_claude(system: str, user: str, model: str, effort: str) -> Epis
         # Stable prefix (instructions + rubric + glossary) cached across the
         # episode loop; only the episode changes per request.
         system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user}],
+        messages=[{
+            "role": "user",
+            "content": [
+                # glossary is the same for every episode of a lesson: cache it too
+                {"type": "text", "text": glossary, "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": user},
+            ],
+        }],
         output_format=EpisodeReview,
         output_config={"effort": effort},
         # On a safety-classifier refusal, re-run on a fallback model chosen by
@@ -287,16 +301,20 @@ def _review_with_claude(system: str, user: str, model: str, effort: str) -> Epis
     return response.parsed_output
 
 
-def _review_with_ollama(system: str, user: str, model: str, effort: str) -> EpisodeReview:
+OLLAMA_TIMEOUT_SECONDS = 900  # generous for a 9B model on a laptop, but never infinite
+
+
+def _review_with_ollama(system: str, glossary: str, user: str, model: str, effort: str) -> EpisodeReview:
     import ollama
 
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    client = ollama.Client(timeout=OLLAMA_TIMEOUT_SECONDS)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": f"{glossary}\n\n{user}"}]
     schema = EpisodeReview.model_json_schema()
     last_error: ValidationError | None = None
     # Local models occasionally miss the schema even when constrained; one
     # retry with the validation error usually fixes it.
     for _ in range(2):
-        response = ollama.chat(model=model, messages=messages, format=schema, options={"temperature": 0})
+        response = client.chat(model=model, messages=messages, format=schema, options={"temperature": 0})
         content = response.message.content or ""
         try:
             return EpisodeReview.model_validate_json(content)
@@ -327,7 +345,8 @@ def review_episode(
     if effort not in EFFORT_LEVELS:
         raise ValueError(f"unknown effort `{effort}`, expected one of {', '.join(EFFORT_LEVELS)}")
     review = _BACKEND_FUNCS[backend](
-        build_system_prompt(glossary_text),
+        build_system_prompt(),
+        build_glossary_block(glossary_text),
         build_user_prompt(episode_text, mechanical),
         model or DEFAULT_MODELS[backend],
         effort,
