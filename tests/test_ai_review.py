@@ -73,7 +73,7 @@ def test_system_prompt_pins_rubric_but_no_lesson_content():
 
 def test_glossary_block_carries_glossary_or_says_there_is_none():
     assert build_glossary_block("Branch\n: A pointer.") == "<lesson_glossary>\nBranch\n: A pointer.\n</lesson_glossary>"
-    assert "no glossary written yet" in build_glossary_block("")
+    assert "no local glossary file was found" in build_glossary_block("")
 
 
 def test_system_prompt_treats_lesson_text_as_data():

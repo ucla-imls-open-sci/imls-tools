@@ -16,10 +16,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from checker import __version__
-from checker.report import Finding, LessonMetadata
+from checker.report import Finding, LessonMetadata, _normalize_for_id
 
-RESULTS_VERSION = 2
-READABLE_VERSIONS = (1, 2)  # v1 lacks target_id/revision/scope/file_hashes; read with defaults
+# v3 adds Finding.identity_anchor, which keeps a finding's ID stable when its
+# message wording changes. A pre-v3 wbcheck rejects a v3 file (unsupported
+# version) rather than recompute IDs from the new wording; re-run
+# `wbcheck check` with that version to rebuild, or upgrade.
+RESULTS_VERSION = 3
+READABLE_VERSIONS = (1, 2, 3)  # v1 lacks target_id/revision/scope/file_hashes; read with defaults
 RESULTS_DIRNAME = ".wbcheck"
 RESULTS_FILENAME = "results.json"
 
@@ -29,10 +33,18 @@ def default_results_path(base_dir: Path) -> Path:
     return base_dir / RESULTS_DIRNAME / RESULTS_FILENAME
 
 
-def _finding_from_dict(data: dict) -> Finding:
-    # `id` and `guides` are derived properties in the file, not fields.
+def _finding_from_dict(data: dict, version: int = RESULTS_VERSION) -> Finding:
+    # `id` and `guides` are derived properties in the file, not fields. The
+    # serialized `id` is never trusted over the inputs it's derived from.
     known = {f.name for f in fields(Finding)}
-    return Finding(**{k: v for k, v in data.items() if k in known})
+    finding = Finding(**{k: v for k, v in data.items() if k in known})
+    if finding.identity_anchor is not None and not isinstance(finding.identity_anchor, str):
+        raise ValueError(f"identity_anchor must be a string, got {type(finding.identity_anchor).__name__}")
+    if version < 3 and finding.identity_anchor is None and finding.source != "ai":
+        # Freeze the anchor from the message as it was written, so a later
+        # rewording of that rule's message can't change this finding's ID.
+        finding.identity_anchor = _normalize_for_id(finding.message)
+    return finding
 
 
 def _metadata_from_dict(data: dict | None) -> LessonMetadata | None:
@@ -124,7 +136,7 @@ class Results:
         return cls(
             target=data["target"],
             lesson_dir=data.get("lesson_dir"),
-            findings=[_finding_from_dict(f) for f in data.get("findings", [])],
+            findings=[_finding_from_dict(f, data["version"]) for f in data.get("findings", [])],
             metadata=_metadata_from_dict(data.get("lesson")),
             blame=git.get("blame"),
             github_base=git.get("github_base"),

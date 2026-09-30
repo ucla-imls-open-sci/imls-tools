@@ -20,6 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from checker import __version__
+from checker.help import AI_NOTE, EXPLAIN_HINT
 from checker.report import Finding, _lesson_metadata_lines, summarize
 from checker.results import Results
 
@@ -81,6 +82,8 @@ def render_header(console: Console, results: Results) -> None:
     console.print(summary)
     if results.scope == "partial":
         console.print(Text(PARTIAL_NOTE, style="yellow"))
+    if any(f.source == "ai" for f in results.findings):
+        console.print(Text(AI_NOTE, style="dim"))
 
 
 def render_findings(console: Console, results: Results, show_source: bool = False) -> None:
@@ -117,18 +120,23 @@ def render_findings(console: Console, results: Results, show_source: bool = Fals
             if f.quote:
                 body.append(Text(f"“{f.quote}”", style="italic"))
             if f.hint:
-                body.append(Text(f.hint, style="dim"))
+                body.append(Text(f"Next: {f.hint}", style="dim"))
             if show_source:
                 excerpt = _source_excerpt(lesson_dir, f)
                 if excerpt is not None:
                     body.append(excerpt)
             grid.add_row(
-                Text(f" {SEVERITY_ICON.get(f.severity, '?')}", style=style),
+                # the word, not only the icon/color, carries the severity
+                Text(f" {SEVERITY_ICON.get(f.severity, '?')} {f.severity}", style=style),
                 _code_text(f),
                 Text(str(f.line) if f.line is not None else "", style="dim"),
                 Group(*body),
             )
         console.print(grid)
+    example = next((f.code for f in sorted(results.findings, key=Finding.sort_key) if f.code), None)
+    if example:
+        console.print()
+        console.print(Text(f"{EXPLAIN_HINT}, e.g. wbcheck explain {example}", style="dim"))
 
 
 def render_ai_reviews(console: Console, reviews: dict[str, str]) -> None:

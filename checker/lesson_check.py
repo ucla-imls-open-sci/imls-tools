@@ -10,12 +10,13 @@ before pushing and waiting on a PR build.
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
 import yaml
 
-from checker.report import Finding, LessonMetadata, assign_occurrences
+from checker.report import Finding, LessonMetadata, _normalize_for_id, assign_occurrences, legacy_anchor
 
 REQUIRED_TOP_DIVS = ("questions", "objectives", "keypoints")
 
@@ -149,8 +150,9 @@ def resolve_glossary_path(lesson_dir: Path) -> str | None:
 
 GLOSSARY_PLACEHOLDER_FINGERPRINT = "this is a placeholder file"
 GLOSSARY_HINT = (
-    "Add the terms your episodes actually use. The Carpentries Lab reviewer checklist asks "
-    "that no key terms are missing from the lesson glossary."
+    "Replace the placeholder with the terms your episodes use, or remove the file if the "
+    "lesson links to an external glossary instead. The Lab checklists ask that key terms are "
+    "defined, locally or in a linked glossary."
 )
 
 # Scaffold text in learners/instructors/profiles files -- these aren't
@@ -250,6 +252,83 @@ _LINK_TITLE_RE = re.compile(r'''^(\S+)(?:\s+["'(].*["')])?$''')
 def _strip_link_title(destination: str) -> str:
     match = _LINK_TITLE_RE.match(destination.strip())
     return match.group(1) if match else destination.strip()
+
+
+# Workbench documents explicit alt attributes (`{alt='A chart'}`, which may
+# wrap across lines) and `alt=""` for decorative images:
+# https://carpentries.github.io/sandpaper-docs/episodes.html#figures
+_MAX_ATTR_LINES = 20
+
+
+def _image_attributes(lines: list[str], index: int, start: int) -> str | None:
+    """The text inside the `{...}` attribute block that starts at
+    `lines[index][start]`, following it across lines until the closing
+    brace (outside quotes); None if no block starts there or it doesn't
+    close within a few lines."""
+    if not lines[index][start:].startswith("{"):
+        return None
+    block = "\n".join([lines[index][start + 1:], *lines[index + 1:index + _MAX_ATTR_LINES]])
+    quote: str | None = None
+    escaped = False
+    for pos, char in enumerate(block):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+        elif char == "}":
+            return block[:pos]
+    return None
+
+
+def _attribute_pairs(attributes: str) -> list[tuple[str, str | None]]:
+    """(key, value) pairs of a Pandoc attribute block's text, honouring
+    quotes and backslash escapes, so `title="an alt='x' example"` is one
+    `title` value, not an `alt` attribute. `#id` and `.class` come back as
+    keys with no value."""
+    pairs: list[tuple[str, str | None]] = []
+    i, n = 0, len(attributes)
+    while i < n:
+        if attributes[i].isspace():
+            i += 1
+            continue
+        start = i
+        while i < n and not attributes[i].isspace() and attributes[i] != "=":
+            i += 1
+        key = attributes[start:i]
+        if i >= n or attributes[i] != "=":
+            pairs.append((key, None))
+            continue
+        i += 1  # past "="
+        if i < n and attributes[i] in "\"'":
+            quote, i, value = attributes[i], i + 1, []
+            while i < n and attributes[i] != quote:
+                if attributes[i] == "\\" and i + 1 < n:
+                    i += 1
+                value.append(attributes[i])
+                i += 1
+            i += 1  # past the closing quote
+            pairs.append((key, "".join(value)))
+        else:
+            start = i
+            while i < n and not attributes[i].isspace():
+                i += 1
+            pairs.append((key, attributes[start:i]))
+    return pairs
+
+
+def _explicit_alt(attributes: str | None) -> str | None:
+    """The value of an explicit `alt` attribute ("" for decorative), or
+    None when there isn't one."""
+    if attributes is None:
+        return None
+    return next((value for key, value in _attribute_pairs(attributes) if key == "alt" and value is not None), None)
+
+
 CODE_FENCE_RE = re.compile(r"^(```+|~~~+)")
 
 
@@ -466,7 +545,8 @@ def check_config(lesson_dir: Path) -> list[Finding]:
                     "config",
                     f"episodes/{name} exists but is not listed in config.yaml `episodes:`",
                     location="config.yaml",
-                    hint="Add it to the episodes list so it's included and ordered in the build.",
+                    hint="Leave it unlisted if it's a draft you aren't ready to publish. When it "
+                    "is ready, add it to `episodes:`, which publishes it in that position.",
                     code="WB009",
                 )
             )
@@ -476,10 +556,12 @@ def check_config(lesson_dir: Path) -> list[Finding]:
             Finding(
                 "info",
                 "config",
-                "no glossary file found (learners/reference.md)",
+                "no local glossary file found (checked learners/reference.md and reference.md)",
                 location="config.yaml",
-                hint="Add learners/reference.md with the key terms your episodes use. This "
-                "check only looks for the file, not its contents.",
+                identity_anchor=legacy_anchor("no glossary file found (learners/reference.md)"),
+                hint="Confirm key terms are defined somewhere learners can find them: a "
+                "learners/reference.md glossary, or a linked external glossary. This check only "
+                "looks for a local file at the usual paths, so a linked glossary is fine.",
                 code="WB010",
             )
         )
@@ -601,6 +683,20 @@ def _front_matter_lines(text: str) -> dict[str, int]:
     return lines
 
 
+def is_minutes(value: object) -> bool:
+    """Whether a front-matter timing is a usable number of minutes: a
+    finite, non-negative int or float. Zero and fractions are fine; a YAML
+    `true` (a bool is an int in Python), `.nan`, `.inf`, or a negative
+    value isn't. This is wbcheck's reading of "a number of minutes", not a
+    stated Workbench rule."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
 def _check_front_matter(
     front_matter: dict, location: str, field_lines: dict[str, int] | None = None
 ) -> list[Finding]:
@@ -628,12 +724,18 @@ def _check_front_matter(
             )
     for field in ("teaching", "exercises"):
         value = front_matter.get(field)
-        if value is not None and not isinstance(value, (int, float)):
+        if value is not None and not is_minutes(value):
+            numeric = isinstance(value, (int, float)) and not isinstance(value, bool)
+            message = (
+                f"`{field}` should be a finite, non-negative number of minutes, got {value!r}"
+                if numeric
+                else f"`{field}` should be a number of minutes, got {value!r}"
+            )
             findings.append(
                 Finding(
                     "warning",
                     "front-matter",
-                    f"`{field}` should be a number of minutes, got {value!r}",
+                    message,
                     location=location,
                     line=field_lines.get(field),
                     hint=f"Set `{field}:` to a plain integer, e.g. `{field}: 15`, not a "
@@ -643,7 +745,7 @@ def _check_front_matter(
             )
 
     teaching, exercises = front_matter.get("teaching"), front_matter.get("exercises")
-    if isinstance(teaching, (int, float)) and isinstance(exercises, (int, float)):
+    if is_minutes(teaching) and is_minutes(exercises):
         total = teaching + exercises
         if total < 20 or total > 60:
             findings.append(
@@ -692,12 +794,20 @@ def _suggest_objective(text: str) -> str | None:
     return rewritten.rstrip(".;: ") if rewritten else None
 
 
+# A list item: indentation, marker (-, *, +, 1., 1)), then its text.
+_LIST_ITEM_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
+
+
 def _check_objective_verbs(body: str, location: str, line_offset: int = 0) -> tuple[list[Finding], int]:
     """Flag objectives that open with a verb that's often hard to assess
     (know/understand/...) instead of an action verb (explain/choose/predict/...)
     -- see CLDT's SMART objectives guidance and the Carpentries Lab reviewer
-    checklist. Also returns the objective bullet count, reused by check_episode()
-    for the "2-4 objectives per episode" and "assessed by an exercise" checks."""
+    checklist. Also returns the objective count, reused by check_episode()
+    for the "2-4 objectives per episode" and zero-exercise-time checks.
+
+    Objectives are the top-level items of the objectives block, whatever
+    the list marker (-, *, +, or numbered); nested bullets and wrapped
+    lines belong to their parent item and aren't counted separately."""
     findings = []
     in_code = _code_fence_mask(body)
     lines = body.splitlines()
@@ -706,6 +816,12 @@ def _check_objective_verbs(body: str, location: str, line_offset: int = 0) -> tu
     objectives_depth = None
     objective_count = 0
     objectives_line = None
+    base_indent: int | None = None
+    # 0.2.1 flagged any `-`/`*` line in the block, nested ones included, and
+    # numbered repeats of the same message in line order. Replay that count
+    # so a finding 0.2.1 would also have made keeps exactly its old ID, and
+    # a now-skipped nested bullet keeps its slot instead of handing it on.
+    legacy_seen: dict[str, int] = {}
 
     for i, line in enumerate(lines):
         if in_code[i]:
@@ -725,24 +841,45 @@ def _check_objective_verbs(body: str, location: str, line_offset: int = 0) -> tu
             continue
 
         if not in_objectives:
+            base_indent = None
             continue
+        legacy: tuple[str, int] | None = None
         stripped = line.strip()
-        if not stripped.startswith(("-", "*")):
-            continue
-        bullet_text = stripped.lstrip("-* ").strip()
+        if stripped.startswith(("-", "*")):
+            old_text = stripped.lstrip("-* ").strip()
+            old_match = VAGUE_OBJECTIVE_OPENER_RE.match(old_text)
+            if old_match:
+                old_message = _wb401_message(old_match.group(1), old_text)
+                key = _normalize_for_id(old_message)
+                legacy = (old_message, legacy_seen.get(key, 0))
+                legacy_seen[key] = legacy[1] + 1
+        item = _LIST_ITEM_RE.match(line)
+        if not item:
+            continue  # a wrapped continuation line, or prose, belongs to its item
+        indent = len(item.group(1).expandtabs(4))
+        if base_indent is None:
+            base_indent = indent
+        if indent > base_indent + 1:
+            continue  # a nested bullet explains its parent objective; it isn't one
+        # `.lstrip("-* ")` as 0.2.1 did for its `-`/`*` bullets, so their
+        # messages (and IDs) are unchanged; it also drops leading `**`.
+        bullet_text = item.group(3).strip().lstrip("-* ").strip()
         objective_count += 1
         verb_match = VAGUE_OBJECTIVE_OPENER_RE.match(bullet_text)
         if verb_match:
+            message = _wb401_message(verb_match.group(1), bullet_text)
             findings.append(
                 Finding(
                     "warning",
                     "objectives",
-                    f'objective opens with a phrase that can be hard to assess '
-                    f'("{verb_match.group(1)}"): "{bullet_text[:70]}"',
+                    message,
                     location=location,
                     line=i + 1 + line_offset,
                     hint=_objective_hint(bullet_text),
                     code="WB401",
+                    # A `+` or numbered objective 0.2.1 never reported gets an
+                    # anchor 0.2.1 couldn't produce, so it can't take a legacy slot.
+                    identity_anchor=legacy_anchor(*legacy) if legacy else _normalize_for_id(message) + "|v3",
                 )
             )
 
@@ -761,6 +898,10 @@ def _check_objective_verbs(body: str, location: str, line_offset: int = 0) -> tu
         )
 
     return findings, objective_count
+
+
+def _wb401_message(opener: str, text: str) -> str:
+    return f'objective opens with a phrase that can be hard to assess ("{opener}"): "{text[:70]}"'
 
 
 def _objective_hint(bullet_text: str) -> str:
@@ -887,13 +1028,18 @@ def _check_contractions(body: str, location: str, line_offset: int = 0) -> list[
     accessibility concern for translation and ESL learners. Contractions are a
     closed set of stems (it's, don't, ...), unlike possessives (any noun + 's),
     so CONTRACTION_RE only matches known stems -- and inline code spans are
-    stripped first so identifiers like `don't_do_this` don't get counted."""
+    stripped first so identifiers like `don't_do_this` don't get counted.
+
+    Only author prose counts: fenced code, inline code, and blockquotes
+    (`> ...`, usually quoted text or data values the author shouldn't
+    change) are skipped, in both the count and the token total. An inline
+    quotation inside a prose line can't be told apart from prose here."""
     in_code = _code_fence_mask(body)
     contraction_count = 0
     word_count = 0
     first_line = None
     for i, line in enumerate(body.splitlines()):
-        if in_code[i]:
+        if in_code[i] or line.lstrip().startswith(">"):
             continue
         prose = INLINE_CODE_RE.sub(" ", line)
         hits = len(CONTRACTION_RE.findall(prose))
@@ -910,12 +1056,16 @@ def _check_contractions(body: str, location: str, line_offset: int = 0) -> list[
             Finding(
                 "info",
                 "style",
-                f"{contraction_count} contractions found ({rate_per_1000:.1f} per 1,000 "
-                "words)",
+                f"{contraction_count} contraction-like matches in author prose "
+                f"({rate_per_1000:.1f} per 1,000 whitespace-separated tokens)",
                 location=location,
                 line=first_line,
-                hint="Consider spelling them out (don't -> do not) for translation and ESL "
-                "learners. The threshold is a local heuristic, not an official Carpentries rule.",
+                identity_anchor=legacy_anchor(
+                    f"{contraction_count} contractions found ({rate_per_1000:.1f} per 1,000 words)"
+                ),
+                hint="Review author prose for translation clarity; keep quoted text, data values, "
+                "and names as they are. The threshold (5+ matches and 5+ per 1,000 "
+                "whitespace-separated tokens) is wbcheck's own, not a Carpentries rule.",
                 code="WB404",
             )
         ]
@@ -980,11 +1130,10 @@ def _check_divs(body: str, location: str, line_offset: int = 0) -> list[Finding]
                 f"`{div_type}` div opened on line {lineno + line_offset} is never closed",
                 location=location,
                 line=lineno + line_offset,
-                hint="Add a closing `:::` fence (same or more colons than the opening "
-                "fence) before the next block starts. An unclosed div silently swallows "
-                "everything after it, including blocks that look fine on their own, "
-                "check whether a `keypoints`/`questions`/`objectives` block further down "
-                "actually landed inside this one instead of at the top level.",
+                hint="Add a closing fence (a line of at least three colons, `:::`) where this "
+                "block should end. An unclosed div swallows everything after it, so check "
+                "whether a `keypoints`/`questions`/`objectives` block further down landed "
+                "inside this one instead of at the top level.",
                 code="WB203",
             )
         )
@@ -1010,7 +1159,16 @@ def _check_divs(body: str, location: str, line_offset: int = 0) -> list[Finding]
 
 def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Finding]:
     findings = []
-    seen: dict[str, int] = {}
+    # Duplicate headings are judged within their hierarchy, as pegboard's
+    # validate_headings() does: the same `### Example` under two different
+    # `##` sections is fine; two under the same parent are ambiguous.
+    # key: (ancestor heading texts, level, text) -> line first seen
+    seen: dict[tuple[tuple[str, ...], int, str], int] = {}
+    ancestors: list[tuple[int, str]] = []
+    # 0.2.1 flagged every repeat of the same text anywhere in the file; count
+    # those per text so a repeat that's still flagged keeps its old ID.
+    legacy_repeats: dict[str, int] = {}
+    seen_anywhere: set[str] = set()
     first_heading_seen = False
     in_code = _code_fence_mask(body)
     # Headings inside fenced divs (callout/spoiler/challenge titles) are
@@ -1081,22 +1239,32 @@ def _check_headings(body: str, location: str, line_offset: int = 0) -> list[Find
         if level >= 2 and div_depth == 0:
             first_heading_seen = True
 
-        if text in seen:
+        legacy_k = None
+        if text in seen_anywhere:
+            legacy_k = legacy_repeats.get(text, 0)
+            legacy_repeats[text] = legacy_k + 1
+        seen_anywhere.add(text)
+        while ancestors and ancestors[-1][0] >= level:
+            ancestors.pop()
+        key = (tuple(t for _, t in ancestors), level, text)
+        ancestors.append((level, text))
+        if key in seen:
+            message = f"heading `{text}` on line {reported_line} duplicates the one on line {seen[key]}"
             findings.append(
                 Finding(
                     "warning",
                     "headings",
-                    f"heading `{text}` on line {reported_line} duplicates the one on line "
-                    f"{seen[text]}",
+                    message,
                     location=location,
-                    hint="Give each challenge/solution/exercise a unique, descriptive heading "
-                    "instead of reusing a generic one.",
+                    hint="Consider a distinguishing heading. Repeats under different parent "
+                    "sections are fine; this flags repeats under the same parent.",
                     line=reported_line,
                     code="WB212",
+                    identity_anchor=legacy_anchor(message, legacy_k or 0),
                 )
             )
         else:
-            seen[text] = reported_line
+            seen[key] = reported_line
 
     return findings
 
@@ -1105,26 +1273,42 @@ def _check_links(body: str, lesson_dir: Path, location: str, line_offset: int = 
     findings = []
     episode_dir = (lesson_dir / "episodes") if (lesson_dir / "episodes").exists() else lesson_dir
     in_code = _code_fence_mask(body)
+    # `![](x)` images the 0.2.1 detector flagged, per path, so a finding
+    # that survives keeps its old ID even when an earlier image on the same
+    # path is no longer flagged (it has an explicit alt attribute).
+    legacy_no_alt: dict[str, int] = {}
+    raw_lines = body.splitlines()
+    lines = [INLINE_CODE_RE.sub(" ", ln) for ln in raw_lines]  # `![x](y.png)` in code is literal text
 
-    for i, line in enumerate(body.splitlines()):
+    for i, line in enumerate(lines):
         if in_code[i]:
             continue
         lineno = i + 1 + line_offset
-        line = INLINE_CODE_RE.sub(" ", line)  # `![x](y.png)` in code is literal text
-        for alt, raw_path in IMAGE_RE.findall(line):
+        for image in IMAGE_RE.finditer(line):
+            alt, raw_path = image.group(1), image.group(2)
             path = _strip_link_title(raw_path)
             if not alt.strip():
-                findings.append(
-                    Finding(
-                        "warning",
-                        "links",
-                        f"image on line {lineno} has no alt text: `{path}`",
-                        location=location,
-                        line=lineno,
-                        hint="Add descriptive alt text for accessibility.",
-                        code="WB301",
+                legacy_k = legacy_no_alt.get(path, 0)
+                legacy_no_alt[path] = legacy_k + 1
+                explicit = _explicit_alt(_image_attributes(lines, i, image.end()))
+                if explicit is None:
+                    findings.append(
+                        Finding(
+                            "warning",
+                            "links",
+                            f"image on line {lineno} has no alt text: no caption, `alt=` "
+                            f"attribute, or decorative `alt=\"\"` marker: `{path}`",
+                            location=location,
+                            line=lineno,
+                            hint="Describe the image with `{alt='...'}` (or caption text). If it's "
+                            "purely decorative, mark it `{alt=\"\"}` so screen readers skip it. "
+                            "This checks that one is present, not that it describes the figure.",
+                            code="WB301",
+                            identity_anchor=legacy_anchor(
+                                f"image on line {lineno} has no alt text: `{path}`", legacy_k
+                            ),
+                        )
                     )
-                )
             if not path.startswith(("http://", "https://", "{{")):
                 # Workbench episodes reference images (e.g. fig/foo.png) relative to
                 # episodes/, not the lesson root -- check both, episode dir first.
@@ -1257,18 +1441,28 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
     findings.extend(_check_contractions(body, location, line_offset))
 
     # [Carpentries Lab]: "All lesson and episode objectives are assessed by
-    # exercises or another opportunity for formative assessment."
-    if objective_count > 0 and front_matter.get("exercises") == 0:
+    # exercises or another opportunity for formative assessment." Zero
+    # declared exercise time is only a prompt to check that: a discussion or
+    # check-in can assess without exercise minutes, and positive minutes
+    # don't prove the objectives are assessed.
+    exercises = front_matter.get("exercises")
+    if objective_count > 0 and is_minutes(exercises) and exercises == 0:
         findings.append(
             Finding(
                 "warning",
                 "objectives",
-                f"{objective_count} objective(s) declared but exercises: 0 -- nothing "
-                "in this episode formally assesses them",
+                f"`exercises` is 0 in the front matter, and this episode declares "
+                f"{objective_count} objective(s)",
                 location=location,
-                hint="Add a challenge, discussion, or other formative-assessment checkpoint "
-                "that lets learners show each objective.",
+                line=_front_matter_lines(text).get("exercises"),
+                hint="Check that the episode gives learners a chance to show each objective "
+                "(a challenge, discussion, or check-in) and that `exercises:` reflects the time "
+                "it takes. Zero minutes doesn't mean nothing assesses the objectives.",
                 code="WB403",
+                identity_anchor=legacy_anchor(
+                    f"{objective_count} objective(s) declared but exercises: 0 -- nothing "
+                    "in this episode formally assesses them"
+                ),
             )
         )
 
@@ -1291,7 +1485,9 @@ def check_episode(path: Path, lesson_dir: Path) -> list[Finding]:
                 "divs",
                 f"{challenges} challenge(s) but only {solutions} solution(s)",
                 location=location,
-                hint="Not every challenge needs a solution block, but double-check this is intentional.",
+                hint="Review each exercise's guidance. This compares totals across the episode, "
+                "so extra solutions for one challenge can hide another with none; discussion "
+                "exercises, or guidance on what to look for, don't need a solution block.",
                 code="WB205",
             )
         )

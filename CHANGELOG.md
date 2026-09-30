@@ -1,5 +1,80 @@
 # Changelog
 
+## Unreleased
+
+From the 2026-09-30 standards review (`design/2026-09-30-standards-audit.md`,
+`-rule-schema-help-proposal.md`, `-claude-standards-handoff.md`; review IDs
+in brackets). The theme: say no more than the check can see.
+
+### Added
+- **`wbcheck explain CODE`** and **`wbcheck rules [--search] [--topic]`**:
+  offline rule help showing what each check observes, why it matters, what to
+  do, when keeping the content is reasonable, the check's limits, whether
+  `wbcheck fix` can help, and the exact source sections with URLs and
+  check dates (DES-01).
+- Rule metadata for all 48 rules: topic, authority (technical requirement,
+  review criterion, recommendation, or wbcheck policy), detection
+  (deterministic, heuristic, AI-assisted), default severity with a reason,
+  and a shared, dated `REFERENCES` table. Tests check it's complete and that
+  each default matches what the check emits.
+- The same explanation in every view (DES-02): the TUI detail pane (with
+  visible source URLs), a "Rule explanations" appendix in markdown/HTML/PDF
+  reports, and issue drafts' "Why these matter". CLI and report output show
+  the severity word, not only an icon, and point to `wbcheck explain`. AI
+  findings carry a note that a matched quote isn't a verified judgment.
+
+### Changed
+- Source links point at the specific section: config rules now cite the
+  config.yaml page (it pointed at the wrong page), CLDT citations use the
+  focused pages, WB212 cites pegboard's heading validation, WB205 the Lab
+  editor notes on solutions [STD-09].
+- Rationale and hints no longer overstate the evidence: WB403 reports zero
+  exercise time without saying nothing assesses the objectives [STD-02];
+  WB205 says it compares totals [STD-04]; WB010/WB114 accept a linked
+  external glossary and WB009 treats unlisted drafts as legitimate [STD-05];
+  WB404 says its threshold is wbcheck's own [STD-08]; WB203's hint no longer
+  asks for a closing fence at least as long as the opener [STD-09]; AI rules
+  say what the model can't see [STD-11].
+- AI review prompt: states that the model sees source text only (no rendered
+  figures, no execution, no learner profiles), that a missing local glossary
+  doesn't mean no glossary, and no longer claims lesson-wide items are
+  "reviewed separately" [STD-05, STD-11]. **Not yet evaluated on a live
+  review** (CONTRIBUTING asks for one when the prompt changes).
+- **Results file format version 3** adds `identity_anchor`. Versions 1-3 are
+  read; wbcheck 0.2.1 and earlier refuse a v3 file ("not supported... re-run
+  `wbcheck check`"), which rebuilds it in their format [STD-06].
+
+### Fixed
+- WB301 no longer flags images with an explicit `{alt='...'}` (including
+  multi-line) or the decorative `{alt=""}` marker [STD-01].
+- WB212 judges duplicate headings within their hierarchy, as pegboard does;
+  the same subheading under different sections is no longer flagged [STD-03].
+- Objectives are counted as top-level list items with any marker (`+` and
+  numbered lists were missed; nested bullets were counted) [STD-07].
+- WB404 skips blockquoted text (quoted interviews, data values) [STD-08].
+- WB104 rejects YAML `true`/`false`, `.nan`, `.inf`, and negative timings;
+  WB105 and WB403 skip invalid timings, so `exercises: false` no longer reads
+  as zero minutes [STD-12].
+
+### Compatibility
+- Finding IDs are preserved: where a message's wording changed, or a
+  corrected check drops a false positive between two repeats, surviving
+  findings keep their 0.2.1 IDs, so `.wbcheck.toml` ignores and issues
+  already filed (open or closed) still match. Tested against 0.2.1 golden IDs
+  and on five real lessons, where every remaining finding kept its ID.
+- Coverage changes can move an explicit `--fail-on warning` exit: `+` and
+  numbered objectives now get WB401/WB402/WB403, invalid timings now get
+  WB104, and some WB212, WB301, WB404, and nested-bullet WB401 findings go
+  away. Default severities, selected rules, issue grouping, and
+  `--fail-on error` behaviour are unchanged.
+
+### Deferred
+- WB213's automatic fix moving to an editorial suggestion [STD-10]; WB012
+  becoming a command error (exit 2) instead of a finding [DES-03]; a TUI
+  help modal (F1) [DES-02]; per-challenge WB205, which needs an ID transition
+  plan first [STD-04, OPEN-02]; which div class orders Workbench accepts
+  [OPEN-01]; whether `created` feeds citation metadata [OPEN-05].
+
 ## 0.2.1 (2026-09-30)
 
 ### Changed
